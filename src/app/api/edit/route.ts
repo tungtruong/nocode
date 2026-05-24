@@ -449,11 +449,15 @@ export async function POST(req: NextRequest) {
         // errors and silently breaks every button in the app.
         const hitTokenCap = totalTokens >= tokenBudget;
         const reason = hitTokenCap
-          ? `Yêu cầu vượt ngân sách ${tokenBudget.toLocaleString()} tokens cho một lần chỉnh sửa (đã dùng ${totalTokens.toLocaleString()}). App vẫn giữ như cũ. Hãy tách thành các thay đổi nhỏ hơn.`
-          : "Yêu cầu phức tạp, AI chưa hoàn thành nên app vẫn giữ như cũ. Hãy mô tả cụ thể hơn (ví dụ tách thành nhiều bước nhỏ) rồi thử lại.";
+          ? `Yêu cầu vượt ngân sách ${tokenBudget.toLocaleString()} tokens cho một lần chỉnh sửa (đã dùng ${totalTokens.toLocaleString()}). App vẫn giữ như cũ và LẦN NÀY KHÔNG TÍNH QUOTA. Hãy tách thành các thay đổi nhỏ hơn.`
+          : "Yêu cầu phức tạp, AI chưa hoàn thành nên app vẫn giữ như cũ. LẦN NÀY KHÔNG TÍNH QUOTA. Hãy mô tả cụ thể hơn (ví dụ tách thành nhiều bước nhỏ) rồi thử lại.";
         sendProgress(`summary ${encodeURIComponent(reason)}`);
-        sendProgress(`done ${toolCalls} tools ${totalTokens} tokens (kept-original)`);
-        if (totalTokens > 0) recordUsage(session.email, totalTokens);
+        sendProgress(`done ${toolCalls} tools ${totalTokens} tokens (refunded)`);
+        // DELIBERATELY no recordUsage here: the user didn't get a working
+        // change, so charging them for the failed attempt is unfair. The
+        // upstream LLM cost is absorbed by the platform — bounded by the
+        // rate limit + maxTurns + tokenBudget that already fired.
+        console.log(`[EDIT] refunded ${totalTokens} tokens (capHit=${hitTokenCap}, turns=${turn}/${maxTurns})`);
 
         const fallbackBytes = encoder.encode(currentHtml);
         const fallbackChunkSize = 2048;
