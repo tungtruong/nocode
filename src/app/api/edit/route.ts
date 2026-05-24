@@ -28,6 +28,7 @@ interface ClarifySnapshot {
   pinnedProvider: AiProvider | null;
   totalPromptTokens: number;
   totalCompletionTokens: number;
+  totalCachedTokens: number;
   toolCalls: number;
   turn: number;
   expiresAt: number;
@@ -255,6 +256,7 @@ export async function POST(req: NextRequest) {
     // per-request budget covers the whole conversation, not just the resume.
     let totalPromptTokens = resumed?.totalPromptTokens ?? 0;
     let totalCompletionTokens = resumed?.totalCompletionTokens ?? 0;
+    let totalCachedTokens = resumed?.totalCachedTokens ?? 0;
     let toolCalls = resumed?.toolCalls ?? 0;
     const encoder = new TextEncoder();
 
@@ -299,7 +301,7 @@ export async function POST(req: NextRequest) {
         try {
         while (turn < maxTurns) {
           if (closed) return;
-          const billedSoFar = weightedTokens(totalPromptTokens, totalCompletionTokens);
+          const billedSoFar = weightedTokens(totalPromptTokens, totalCompletionTokens, totalCachedTokens);
           if (billedSoFar >= tokenBudget) {
             console.log(`[EDIT] per-request token budget hit (${billedSoFar}/${tokenBudget} weighted) — stopping agent`);
             break;
@@ -339,6 +341,12 @@ export async function POST(req: NextRequest) {
           if (usage) {
             totalPromptTokens += usage.prompt_tokens || 0;
             totalCompletionTokens += usage.completion_tokens || 0;
+            // Multi-turn agent loops benefit massively from prefix caching:
+            // every turn after the first re-uses the same system prompt + tool
+            // schemas + early tool results, so the cached_tokens count is
+            // typically a large fraction of prompt_tokens — billing at the
+            // discounted rate keeps the per-request weighted total realistic.
+            totalCachedTokens += usage.prompt_tokens_details?.cached_tokens || 0;
           }
 
           const msg = response.choices[0]?.message;
@@ -426,13 +434,14 @@ export async function POST(req: NextRequest) {
               pinnedProvider,
               totalPromptTokens,
               totalCompletionTokens,
+              totalCachedTokens,
               toolCalls,
               turn,
               expiresAt: Date.now() + CLARIFY_TTL_MS,
             });
             // Charge tokens used so far — the clarify question was real work.
-            const billedClarify = weightedTokens(totalPromptTokens, totalCompletionTokens);
-            if (billedClarify > 0) recordUsage(session.email, totalPromptTokens, totalCompletionTokens);
+            const billedClarify = weightedTokens(totalPromptTokens, totalCompletionTokens, totalCachedTokens);
+            if (billedClarify > 0) recordUsage(session.email, totalPromptTokens, totalCompletionTokens, totalCachedTokens);
             console.log(`[EDIT] clarify key=${key} q=${JSON.stringify(clarify.question)} opts=${clarify.options.length}`);
             sendProgress(
               `clarify ${encodeURIComponent(JSON.stringify({ key, question: clarify.question, options: clarify.options }))}`
@@ -550,9 +559,9 @@ export async function POST(req: NextRequest) {
 
           sendProgress(`summary ${encodeURIComponent(summary.slice(0, 300))}`);
 
-          const billed = weightedTokens(totalPromptTokens, totalCompletionTokens);
-          console.log(`[EDIT] done tools=${toolCalls} in=${totalPromptTokens} out=${totalCompletionTokens} billed=${billed} html=${mergedHtml.length}b`);
-          if (billed > 0) recordUsage(session.email, totalPromptTokens, totalCompletionTokens);
+          const billed = weightedTokens(totalPromptTokens, totalCompletionTokens, totalCachedTokens);
+          console.log(`[EDIT] done tools=${toolCalls} in=${totalPromptTokens} (cached=${totalCachedTokens}) out=${totalCompletionTokens} billed=${billed} html=${mergedHtml.length}b`);
+          if (billed > 0) recordUsage(session.email, totalPromptTokens, totalCompletionTokens, totalCachedTokens);
 
           const outputViolation = scanGeneratedHtml(mergedHtml);
           if (outputViolation) {
@@ -582,7 +591,7 @@ export async function POST(req: NextRequest) {
         // unchanged: partial edits typically leave JS event handlers wired
         // to HTML elements that were never added, which throws null-pointer
         // errors and silently breaks every button in the app.
-        const billedFallback = weightedTokens(totalPromptTokens, totalCompletionTokens);
+        const billedFallback = weightedTokens(totalPromptTokens, totalCompletionTokens, totalCachedTokens);
         const hitTokenCap = billedFallback >= tokenBudget;
         const reason = hitTokenCap
           ? `Yêu cầu hơi lớn nên AI chưa hoàn thành kịp (đã dùng ${billedFallback.toLocaleString()} tokens). App vẫn giữ nguyên, lần này không tính vào quota của bạn. Bạn có thể thử lại với prompt cụ thể hơn hoặc nâng gói lên Pro để xử lý các thay đổi lớn.`
@@ -593,7 +602,7 @@ export async function POST(req: NextRequest) {
         // change, so charging them for the failed attempt is unfair. The
         // upstream LLM cost is absorbed by the platform — bounded by the
         // rate limit + maxTurns + tokenBudget that already fired.
-        console.log(`[EDIT] refunded in=${totalPromptTokens} out=${totalCompletionTokens} weighted=${billedFallback} (capHit=${hitTokenCap}, turns=${turn}/${maxTurns})`);
+        console.log(`[EDIT] refunded in=${totalPromptTokens} (cached=${totalCachedTokens}) out=${totalCompletionTokens} weighted=${billedFallback} (capHit=${hitTokenCap}, turns=${turn}/${maxTurns})`);
 
         const fallbackBytes = encoder.encode(currentHtml);
         const fallbackChunkSize = 2048;

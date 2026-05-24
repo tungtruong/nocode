@@ -12,10 +12,13 @@ export type Tier = "free" | "pro" | "team";
 //
 // Reference DeepSeek V3 chat rates (2025):
 //   input  cache-miss   $0.27 / 1M
+//   input  cache-hit    $0.014 / 1M  (≈ 5% of cache-miss — DeepSeek auto-caches
+//                                     identical prompt prefixes across calls)
 //   output              $1.10 / 1M
 //   → OUTPUT_TO_INPUT_RATIO = 1.10 / 0.27 ≈ 4.07
+//   → CACHED_TO_INPUT_RATIO = 0.014 / 0.27 ≈ 0.052
 //
-// Cost per weighted token (= input token cost): $0.27 / 1M = $0.00000027.
+// Cost per weighted token (= cache-miss input token cost): $0.27 / 1M.
 // Paid plans sized so price covers DeepSeek cost with a 4× gross margin:
 //
 //   Plan   Price/mo   Cost target (price/4)   Weighted-token budget
@@ -24,12 +27,29 @@ export type Tier = "free" | "pro" | "team";
 //   Team   $39        $9.75                   $9.75/ $0.27/M = 36,000,000
 //
 // Recalibrate when DeepSeek rates or the fallback (OpenAI) mix changes.
-export const INPUT_RATE_PER_TOKEN = 0.27 / 1_000_000;   // USD per input token
-export const OUTPUT_RATE_PER_TOKEN = 1.10 / 1_000_000;  // USD per output token
+export const INPUT_RATE_PER_TOKEN = 0.27 / 1_000_000;          // USD per cache-miss input token
+export const CACHED_INPUT_RATE_PER_TOKEN = 0.014 / 1_000_000;  // USD per cache-hit input token
+export const OUTPUT_RATE_PER_TOKEN = 1.10 / 1_000_000;         // USD per output token
 export const OUTPUT_TO_INPUT_RATIO = OUTPUT_RATE_PER_TOKEN / INPUT_RATE_PER_TOKEN;
+export const CACHED_TO_INPUT_RATIO = CACHED_INPUT_RATE_PER_TOKEN / INPUT_RATE_PER_TOKEN;
 
-export function weightedTokens(promptTokens: number, completionTokens: number): number {
-  return Math.round((promptTokens || 0) + (completionTokens || 0) * OUTPUT_TO_INPUT_RATIO);
+// Bill in "weighted tokens" where 1 weighted token = 1 cache-miss input token.
+// Cache-hit input tokens are billed at ~5% (matches our DeepSeek cost), so a
+// multi-turn agent loop that keeps a stable system+context prefix only pays
+// full price for the *new* tokens each turn — the user gets the same discount
+// DeepSeek gives us. Output tokens are billed at the ~4× output/input ratio.
+//
+// Pass `cachedTokens` from the LLM's usage.prompt_tokens_details.cached_tokens
+// field. Callers that don't have a cache count can pass 0 (legacy behavior).
+export function weightedTokens(promptTokens: number, completionTokens: number, cachedTokens: number = 0): number {
+  const prompt = promptTokens || 0;
+  const cached = Math.min(cachedTokens || 0, prompt);
+  const nonCached = prompt - cached;
+  return Math.round(
+    nonCached +
+    cached * CACHED_TO_INPUT_RATIO +
+    (completionTokens || 0) * OUTPUT_TO_INPUT_RATIO
+  );
 }
 
 export const TIER_LIMITS: Record<Tier, number> = {
@@ -156,8 +176,8 @@ export function assertQuota(email: string): UsageInfo {
 // (response.usage.prompt_tokens, completion_tokens). We store the *weighted*
 // total in tokens_used so the quota check and the LLM bill stay aligned even
 // when a request has an unusually output-heavy ratio.
-export function recordUsage(email: string, promptTokens: number, completionTokens: number): void {
-  const weighted = weightedTokens(promptTokens, completionTokens);
+export function recordUsage(email: string, promptTokens: number, completionTokens: number, cachedTokens: number = 0): void {
+  const weighted = weightedTokens(promptTokens, completionTokens, cachedTokens);
   if (weighted <= 0) return;
   const period = currentPeriod();
   getDb()

@@ -144,6 +144,7 @@ export async function POST(req: NextRequest) {
           let accumulated = "";
           let promptTokens = 0;
           let completionTokens = 0;
+          let cachedTokens = 0;
           for await (const chunk of genStream) {
             if (closed) break;
             const content = chunk.choices[0]?.delta?.content || "";
@@ -155,10 +156,14 @@ export async function POST(req: NextRequest) {
             if (chunk.usage) {
               promptTokens = chunk.usage.prompt_tokens || 0;
               completionTokens = chunk.usage.completion_tokens || 0;
+              // DeepSeek + OpenAI both surface cache hits here. Counted at the
+              // discounted rate inside weightedTokens — this is what makes a
+              // long stable system+context prefix cheap on repeat calls.
+              cachedTokens = chunk.usage.prompt_tokens_details?.cached_tokens || 0;
             }
           }
-          let billedTokens = weightedTokens(promptTokens, completionTokens);
-          if (billedTokens > 0) recordUsage(session.email, promptTokens, completionTokens);
+          let billedTokens = weightedTokens(promptTokens, completionTokens, cachedTokens);
+          if (billedTokens > 0) recordUsage(session.email, promptTokens, completionTokens, cachedTokens);
           // If the gen call alone blew through the per-request budget, skip
           // fix + summary (both cost more tokens) and ship what we have.
           const tokenBudget = perRequestLimit(session.email);
@@ -204,6 +209,7 @@ export async function POST(req: NextRequest) {
               let fixed = "";
               let fixPrompt = 0;
               let fixCompletion = 0;
+              let fixCached = 0;
               for await (const chunk of fixStream) {
                 if (closed) break;
                 const content = chunk.choices[0]?.delta?.content || "";
@@ -214,10 +220,11 @@ export async function POST(req: NextRequest) {
                 if (chunk.usage) {
                   fixPrompt = chunk.usage.prompt_tokens || 0;
                   fixCompletion = chunk.usage.completion_tokens || 0;
+                  fixCached = chunk.usage.prompt_tokens_details?.cached_tokens || 0;
                 }
               }
-              const fixBilled = weightedTokens(fixPrompt, fixCompletion);
-              if (fixBilled > 0) recordUsage(session.email, fixPrompt, fixCompletion);
+              const fixBilled = weightedTokens(fixPrompt, fixCompletion, fixCached);
+              if (fixBilled > 0) recordUsage(session.email, fixPrompt, fixCompletion, fixCached);
               billedTokens += fixBilled;
               if (fixed.trim()) accumulated = fixed;
             }
@@ -269,7 +276,12 @@ export async function POST(req: NextRequest) {
               });
             }, (reason) => console.log(`[Chat] fallback to OpenAI for summary: ${reason}`));
             const summaryText = (summaryResp.choices[0]?.message?.content || "").trim();
-            if (summaryResp.usage) recordUsage(session.email, summaryResp.usage.prompt_tokens || 0, summaryResp.usage.completion_tokens || 0);
+            if (summaryResp.usage) recordUsage(
+              session.email,
+              summaryResp.usage.prompt_tokens || 0,
+              summaryResp.usage.completion_tokens || 0,
+              summaryResp.usage.prompt_tokens_details?.cached_tokens || 0,
+            );
             if (summaryText) {
               sendProgress(`summary ${encodeURIComponent(summaryText.slice(0, 600))}`);
             }
