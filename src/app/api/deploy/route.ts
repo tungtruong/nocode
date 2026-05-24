@@ -8,7 +8,7 @@ import { addApp, pickSlug } from "@/lib/store";
 const MAX_HTML_SIZE = 5 * 1024 * 1024; // 5MB
 
 // Build the user-facing URL for a deployed app. If APPS_DOMAIN is set
-// (e.g. "vibemvp.io" with a `*.vibemvp.io` wildcard DNS record pointed at
+// (e.g. "justvibe.me" with a `*.justvibe.me` wildcard DNS record pointed at
 // this server), serve as `<slug>.<APPS_DOMAIN>`. Otherwise fall back to the
 // path-based `/apps/<id>` URL on the base host.
 function appUrl(slug: string, id: string): string {

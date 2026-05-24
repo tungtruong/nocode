@@ -141,7 +141,7 @@ function migrate(db: Database.Database) {
     db.exec("ALTER TABLE users ADD COLUMN referred_by_email TEXT");
   }
 
-  // Apps: optional vanity slug for *.vibemvp.io routing.
+  // Apps: optional vanity slug for *.justvibe.me routing.
   const appCols = db.prepare("PRAGMA table_info(apps)").all() as Array<{ name: string }>;
   if (!appCols.some((c) => c.name === "slug")) {
     db.exec("ALTER TABLE apps ADD COLUMN slug TEXT");

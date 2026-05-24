@@ -3,7 +3,7 @@ import { getSession } from "@/lib/auth";
 import { appBySlug } from "@/lib/store";
 
 // Next 16 proxy always runs on Node.js runtime, so we can call into
-// better-sqlite3 to resolve <slug>.vibemvp.io → /apps/<id>.
+// better-sqlite3 to resolve <slug>.justvibe.me → /apps/<id>.
 
 const PROTECTED = ["/builder"];
 
