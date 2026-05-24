@@ -7,7 +7,7 @@ import { getApp } from "@/lib/store";
 
 const README = `# {title}
 
-App này được tạo bằng nocode AI builder. Mã nguồn nằm hoàn toàn trong file \`index.html\` (HTML + CSS + JS inline).
+App này được tạo bằng JustVibe AI builder. Mã nguồn nằm hoàn toàn trong file \`index.html\` (HTML + CSS + JS inline).
 
 ## Cách deploy nhanh nhất (chọn 1 trong 3)
 
@@ -33,12 +33,12 @@ Vercel tự detect static HTML, deploy luôn.
 3. Truy cập tại \`<user>.github.io/<repo>\`
 
 ## Lưu ý
-- App lưu trạng thái trong bộ nhớ tạm (refresh là mất). Nếu cần lưu lâu dài, sửa \`<script>\` để dùng \`localStorage\` (chỉ hoạt động khi deploy lên domain thật, không hoạt động trong sandbox preview của nocode).
+- App lưu trạng thái trong bộ nhớ tạm (refresh là mất). Nếu cần lưu lâu dài, sửa \`<script>\` để dùng \`localStorage\` (chỉ hoạt động khi deploy lên domain thật, không hoạt động trong sandbox preview của JustVibe).
 - File tự đứng được, không cần build tool / npm install.
 - Có thể chỉnh sửa trực tiếp \`index.html\` bằng bất kỳ trình soạn thảo nào.
 
 ---
-Sinh bởi nocode · {date}
+Sinh bởi JustVibe · {date}
 `;
 
 const ID_RE = /^[a-zA-Z0-9_-]{6,64}$/;

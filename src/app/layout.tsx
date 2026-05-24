@@ -10,7 +10,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "nocode — Dựng app không cần code",
+  title: "JustVibe — Dựng app không cần code",
   description: "Mô tả ý tưởng. AI dựng web app theo thời gian thực. Một chạm để deploy.",
 };
 

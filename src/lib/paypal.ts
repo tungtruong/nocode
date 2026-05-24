@@ -102,7 +102,7 @@ export async function createSubscription(opts: {
         custom_id: opts.email,
         subscriber: { email_address: opts.email },
         application_context: {
-          brand_name: "nocode",
+          brand_name: "JustVibe",
           locale: "vi-VN",
           shipping_preference: "NO_SHIPPING",
           user_action: "SUBSCRIBE_NOW",

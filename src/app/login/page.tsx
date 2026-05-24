@@ -51,7 +51,7 @@ export default function LoginPage() {
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#7c3aed] to-[#a855f7] shadow-sm shadow-[#7c3aed]/20">
               <svg className="h-4 w-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>
             </div>
-            <span className="text-lg font-bold tracking-tight text-[#18181b]">nocode</span>
+            <span className="text-lg font-bold tracking-tight text-[#18181b]">JustVibe</span>
           </Link>
         </div>
         <div className="rounded-2xl border border-[#e8e8ec] bg-white p-7 shadow-sm">

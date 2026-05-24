@@ -32,7 +32,7 @@ export const t = {
     feature2Desc: "Từng nút bấm, từng dòng chữ hiện ra theo thời gian thực khi AI viết code.",
     feature3Title: "Deploy một chạm",
     feature3Desc: "App tự động lên sóng. Gửi link cho bạn bè dùng ngay.",
-    footerTag: "Dựng bằng nocode. Không cần code để làm ra công cụ này.",
+    footerTag: "Dựng bằng JustVibe. Không cần code để làm ra công cụ này.",
 
     // Login
     loginTitle: "Đăng nhập",
