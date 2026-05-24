@@ -149,6 +149,49 @@ function migrate(db: Database.Database) {
       "CREATE UNIQUE INDEX IF NOT EXISTS apps_slug_idx ON apps(slug) WHERE slug IS NOT NULL"
     );
   }
+
+  // Projects: app mode (web_app, qr_menu, wedding, landing, pitch_deck,
+  // cv_resume). Default 'web_app' so existing rows keep current behavior.
+  const projCols = db.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
+  if (!projCols.some((c) => c.name === "mode")) {
+    db.exec("ALTER TABLE projects ADD COLUMN mode TEXT NOT NULL DEFAULT 'web_app'");
+  }
+  // Counts edits per project so we can spot templates that need more iteration.
+  if (!projCols.some((c) => c.name === "edit_count")) {
+    db.exec("ALTER TABLE projects ADD COLUMN edit_count INTEGER NOT NULL DEFAULT 0");
+  }
+
+  // Template usage telemetry. One row per generation (chat or edit) — tracks
+  // mode, whether it ended in a deploy, and whether placeholders leaked.
+  // Aggregated by /admin/templates.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS template_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_email TEXT NOT NULL COLLATE NOCASE,
+      project_id TEXT,
+      mode TEXT NOT NULL,
+      kind TEXT NOT NULL,            -- 'generate' | 'edit' | 'deploy'
+      placeholder_leak INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS template_usage_mode_idx ON template_usage(mode, kind, created_at);
+  `);
+
+  // User-reported template feedback. UI shows a "👎 Mẫu không phù hợp" button
+  // under preview. Surfaced in admin view, sort desc by count to pick the
+  // worst-performing template to revise next.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS template_feedback (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_email TEXT NOT NULL COLLATE NOCASE,
+      project_id TEXT,
+      mode TEXT NOT NULL,
+      reason TEXT NOT NULL,          -- 'missing' | 'wrong_industry' | 'ugly' | 'other'
+      note TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS template_feedback_mode_idx ON template_feedback(mode, created_at);
+  `);
 }
 
 // One-time import of the old JSON files into SQLite. Marked done in `meta`

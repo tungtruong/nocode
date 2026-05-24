@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSession, authError } from "@/lib/auth";
 import { getProjectsByUser, saveProject } from "@/lib/store";
+import { modeOf } from "@/lib/modes";
 
 export async function GET() {
   try {
@@ -22,7 +23,13 @@ export async function POST(req: NextRequest) {
     if (!projectId || !appName) {
       return NextResponse.json({ error: "Thiếu thông tin" }, { status: 400 });
     }
-    await saveProject(projectId, session.email, { appName, msgs: msgs || [], html: html || "", url: url || "" });
+    await saveProject(projectId, session.email, {
+      appName,
+      msgs: msgs || [],
+      html: html || "",
+      url: url || "",
+      mode: modeOf(body.mode),
+    });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "Lỗi máy chủ" }, { status: 500 });

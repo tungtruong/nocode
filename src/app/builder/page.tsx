@@ -6,6 +6,7 @@ import Link from "next/link";
 import { LangToggle, useLang } from "@/components/LangProvider";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { UsageBadge } from "@/components/UsageBadge";
+import { APP_MODES, DEFAULT_MODE, type ModeId } from "@/lib/modes";
 
 function cleanHtml(raw: string): string {
   let cleaned = raw;
@@ -128,6 +129,7 @@ interface SavedProject {
   msgs: Msg[];
   html: string;
   url: string;
+  mode?: ModeId;
 }
 
 type Phase = "idle" | "new_app" | "thinking" | "streaming" | "done";
@@ -139,6 +141,13 @@ export default function BuilderPage() {
 
   const [appId, setAppId] = useState("");
   const [appName, setAppName] = useState("");
+  // Project mode (web_app, qr_menu, wedding, ...). Auto-detected from the
+  // first user message via /api/intent; persists with the project. Badge in
+  // the chat header lets the user override.
+  const [mode, setMode] = useState<ModeId>(DEFAULT_MODE);
+  const [showModeModal, setShowModeModal] = useState(false);
+  const [showFlagModal, setShowFlagModal] = useState(false);
+  const [flagSent, setFlagSent] = useState(false);
   const [newAppName, setNewAppName] = useState("");
   const [savedProjects, setSavedProjects] = useState<SavedProject[]>([]);
   const [input, setInput] = useState("");
@@ -195,16 +204,16 @@ export default function BuilderPage() {
     fetch("/api/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectId: appId, appName, msgs, html, url }),
+      body: JSON.stringify({ projectId: appId, appName, msgs, html, url, mode }),
     }).catch(() => {});
-  }, [appId, appName, msgs, html, url]);
+  }, [appId, appName, msgs, html, url, mode]);
 
   // Sidebar list = server-fetched projects with current project merged in (no setState in effect)
   const allProjects = useMemo<SavedProject[]>(() => {
     if (!appId || !appName) return savedProjects;
-    const current: SavedProject = { appId, appName, msgs, html, url };
+    const current: SavedProject = { appId, appName, msgs, html, url, mode };
     return [current, ...savedProjects.filter((p) => p.appId !== appId)];
-  }, [savedProjects, appId, appName, msgs, html, url]);
+  }, [savedProjects, appId, appName, msgs, html, url, mode]);
 
   // Open existing project
   const openProject = useCallback((p: SavedProject) => {
@@ -213,6 +222,7 @@ export default function BuilderPage() {
     setMsgs(p.msgs);
     setHtml(p.html);
     setUrl(p.url);
+    setMode(p.mode ?? DEFAULT_MODE);
     setPhase("idle");
     if (p.html) setMobileTab("preview");
   }, []);
@@ -227,6 +237,8 @@ export default function BuilderPage() {
     setMsgs([]);
     setHtml("");
     setUrl("");
+    setMode(DEFAULT_MODE);
+    setFlagSent(false);
     setPhase("idle");
     setNewAppName("");
     setMobileTab("chat");
@@ -316,12 +328,36 @@ export default function BuilderPage() {
 
     try {
       const isFirst = !html;
+      // Auto-detect mode from the user's first message before /api/chat. Falls
+      // back gracefully if /api/intent errors — we just keep the default mode.
+      let effectiveMode = mode;
+      if (isFirst && mode === DEFAULT_MODE) {
+        try {
+          setProgress(t.modeDetecting);
+          const r = await fetch("/api/intent", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: text }),
+            signal: c.signal,
+          });
+          if (r.ok) {
+            const d = await r.json();
+            if (d?.mode && d.mode !== DEFAULT_MODE) {
+              effectiveMode = d.mode;
+              setMode(d.mode);
+            }
+          }
+        } catch { /* classifier best-effort — proceed with default */ }
+      }
+
       const ep = isFirst ? "/api/chat" : "/api/edit";
       const bd = isFirst
-        ? JSON.stringify({ messages: all.slice(0, -1), currentHtml: html, newMessage: text })
+        ? JSON.stringify({ messages: all.slice(0, -1), currentHtml: html, newMessage: text, projectId: appId, mode: effectiveMode })
         : JSON.stringify({
             currentHtml: html,
             newMessage: text,
+            projectId: appId,
+            mode: effectiveMode,
             // If this is the answer to a previous clarify question, attach the
             // resume token so the server picks up the cached agent state
             // instead of re-reading every file.
@@ -436,7 +472,7 @@ export default function BuilderPage() {
       // Re-pull usage now that the round-trip has completed (success or fail).
       setUsageNonce((n) => n + 1);
     }
-  }, [input, msgs, html, phase, t, pendingClarifyKey]);
+  }, [input, msgs, html, phase, t, pendingClarifyKey, mode, appId]);
 
   // Memoize the animated version so reopening a project or toggling
   // between iframes doesn't re-inject every render.
@@ -757,6 +793,31 @@ export default function BuilderPage() {
 
       <div className="flex flex-1 min-h-0">
         <div className={`${mobileTab === "preview" ? "hidden" : "flex"} md:flex w-full flex-col md:w-[384px] lg:w-[440px] xl:w-[480px] bg-white border-r border-[#e2e8f0]`}>
+          <div className="border-b border-[#e2e8f0] px-4 py-2 flex items-center justify-between gap-2 bg-[#fafafa]">
+            <button
+              type="button"
+              onClick={() => setShowModeModal(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white border border-[#e2e8f0] hover:border-[#7c3aed]/40 text-xs font-medium text-[#334155] transition"
+              title={t.modeChangeAction}
+            >
+              <span>{APP_MODES[mode].emoji}</span>
+              <span>{t[APP_MODES[mode].labelKey]}</span>
+              <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className="opacity-50"><path d="M3 5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+            </button>
+            {html && !flagSent && (
+              <button
+                type="button"
+                onClick={() => setShowFlagModal(true)}
+                className="text-xs text-[#94a3b8] hover:text-[#ef4444] transition px-2 py-1"
+                title={t.templateFlagBtn}
+              >
+                👎 {t.templateFlagBtn}
+              </button>
+            )}
+            {flagSent && (
+              <span className="text-xs text-emerald-600">✓ {t.templateFlagThanks}</span>
+            )}
+          </div>
           <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 space-y-5">
             {msgs.map((m) => {
               const isLast = m.id === msgs[msgs.length - 1]?.id;
@@ -972,6 +1033,147 @@ export default function BuilderPage() {
           onCancel={() => setQuotaExceeded(null)}
         />
       )}
+
+      {showModeModal && (
+        <ModePickerModal
+          current={mode}
+          hasContent={!!html}
+          onPick={(id) => {
+            // Warn before switching mid-project: switching only affects future
+            // edits — the existing HTML is not regenerated. Confirm so the user
+            // doesn't think it'll magically remake the app.
+            if (html && id !== mode && !window.confirm(t.modeChangeConfirm)) return;
+            setMode(id);
+            setShowModeModal(false);
+          }}
+          onClose={() => setShowModeModal(false)}
+          t={t}
+        />
+      )}
+
+      {showFlagModal && (
+        <FlagTemplateModal
+          mode={mode}
+          projectId={appId || null}
+          onSent={() => {
+            setShowFlagModal(false);
+            setFlagSent(true);
+          }}
+          onClose={() => setShowFlagModal(false)}
+          t={t}
+        />
+      )}
+    </div>
+  );
+}
+
+function ModePickerModal(props: {
+  current: ModeId;
+  hasContent: boolean;
+  onPick: (id: ModeId) => void;
+  onClose: () => void;
+  t: ReturnType<typeof useLang>["t"];
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={props.onClose}>
+      <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="p-5 border-b border-[#e2e8f0] flex items-center justify-between">
+          <h2 className="font-semibold text-[#0f172a]">{props.t.modeModalTitle}</h2>
+          <button onClick={props.onClose} className="text-[#64748b] hover:text-[#0f172a] text-xl leading-none" aria-label="Close">×</button>
+        </div>
+        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {Object.values(APP_MODES).map((m) => {
+            const isCur = m.id === props.current;
+            return (
+              <button
+                key={m.id}
+                onClick={() => props.onPick(m.id)}
+                className={`text-left p-4 rounded-xl border transition ${
+                  isCur
+                    ? "border-[#7c3aed] bg-[#7c3aed]/5"
+                    : "border-[#e2e8f0] hover:border-[#7c3aed]/40 hover:bg-[#7c3aed]/[0.02]"
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xl">{m.emoji}</span>
+                  <span className="font-medium text-[#0f172a]">{props.t[m.labelKey]}</span>
+                  {isCur && <span className="ml-auto text-[10px] uppercase tracking-wide text-[#7c3aed] font-semibold">Đang chọn</span>}
+                </div>
+                <p className="text-xs text-[#64748b]">{props.t[m.descKey]}</p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FlagTemplateModal(props: {
+  mode: ModeId;
+  projectId: string | null;
+  onSent: () => void;
+  onClose: () => void;
+  t: ReturnType<typeof useLang>["t"];
+}) {
+  const [reason, setReason] = useState<"missing" | "wrong_industry" | "ugly" | "other">("missing");
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async () => {
+    setSubmitting(true);
+    try {
+      await fetch("/api/feedback/template", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: props.mode, reason, note: note.trim() || null, projectId: props.projectId }),
+      });
+      props.onSent();
+    } catch {
+      props.onSent();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={props.onClose}>
+      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+        <div className="p-5 border-b border-[#e2e8f0] flex items-center justify-between">
+          <h2 className="font-semibold text-[#0f172a]">{props.t.templateFlagTitle}</h2>
+          <button onClick={props.onClose} className="text-[#64748b] hover:text-[#0f172a] text-xl leading-none" aria-label="Close">×</button>
+        </div>
+        <div className="p-5 space-y-2">
+          {([
+            ["missing", props.t.templateFlagReasonMissing],
+            ["wrong_industry", props.t.templateFlagReasonWrongIndustry],
+            ["ugly", props.t.templateFlagReasonUgly],
+            ["other", props.t.templateFlagReasonOther],
+          ] as const).map(([id, label]) => (
+            <label key={id} className="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="reason" checked={reason === id} onChange={() => setReason(id)} />
+              <span className="text-sm text-[#334155]">{label}</span>
+            </label>
+          ))}
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder={props.t.templateFlagNotePlaceholder}
+            className="w-full mt-3 px-3 py-2 border border-[#e2e8f0] rounded-lg text-sm resize-none"
+            rows={3}
+            maxLength={1000}
+          />
+        </div>
+        <div className="p-4 border-t border-[#e2e8f0] flex justify-end">
+          <button
+            onClick={submit}
+            disabled={submitting}
+            className="px-4 py-2 bg-[#7c3aed] text-white rounded-lg text-sm font-medium hover:bg-[#6d28d9] disabled:opacity-50"
+          >
+            {props.t.templateFlagSubmit}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

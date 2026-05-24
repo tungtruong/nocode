@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import fs from "fs/promises";
 import path from "path";
 import { requireSession, authError } from "@/lib/auth";
-import { addApp, getApp, pickSlug } from "@/lib/store";
+import { addApp, getApp, getProject, logTemplateUsage, pickSlug } from "@/lib/store";
 
 const MAX_HTML_SIZE = 5 * 1024 * 1024; // 5MB
 
@@ -84,6 +84,18 @@ export async function POST(req: NextRequest) {
       });
     } catch (e) {
       console.error("Store error:", e);
+    }
+
+    // Telemetry: a successful deploy is the strongest signal that the template
+    // worked for this user. Look up the project's mode (best-effort — silent on
+    // miss for legacy projects).
+    if (projectId && typeof projectId === "string") {
+      try {
+        const proj = await getProject(projectId, session.email);
+        if (proj) logTemplateUsage(session.email, projectId, proj.mode, "deploy", false);
+      } catch {
+        // non-fatal
+      }
     }
 
     return NextResponse.json({ url, id, slug });

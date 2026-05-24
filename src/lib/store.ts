@@ -1,6 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { getDb } from "@/lib/db";
+import { DEFAULT_MODE, modeOf, type ModeId } from "@/lib/modes";
 
 export interface AppMeta {
   user_email: string;
@@ -142,6 +143,7 @@ export interface ProjectData {
   html: string;
   url: string;
   updated_at: string;
+  mode: ModeId;
 }
 
 function isSafeProjectId(id: string): boolean {
@@ -155,9 +157,17 @@ export async function saveProject(
 ): Promise<void> {
   if (!isSafeProjectId(projectId)) throw new Error("Invalid project id");
   const updatedAt = new Date().toISOString();
+  const mode = modeOf(data.mode);
+  // Preserve edit_count: INSERT OR REPLACE would reset it to default. Read
+  // current value first, increment per save (each save = either initial create
+  // or a meaningful edit checkpoint), then write back.
+  const existing = getDb()
+    .prepare("SELECT edit_count FROM projects WHERE id = ? AND user_email = ?")
+    .get(projectId, userEmail) as { edit_count: number } | undefined;
+  const editCount = existing ? existing.edit_count + 1 : 0;
   getDb()
     .prepare(
-      "INSERT OR REPLACE INTO projects (id, user_email, app_name, msgs_json, html, url, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      "INSERT OR REPLACE INTO projects (id, user_email, app_name, msgs_json, html, url, updated_at, mode, edit_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     )
     .run(
       projectId,
@@ -166,7 +176,9 @@ export async function saveProject(
       JSON.stringify(data.msgs || []),
       data.html || "",
       data.url || "",
-      updatedAt
+      updatedAt,
+      mode,
+      editCount,
     );
 }
 
@@ -175,7 +187,7 @@ export async function getProjectsByUser(
 ): Promise<{ id: string; data: ProjectData }[]> {
   const rows = getDb()
     .prepare(
-      "SELECT id, user_email, app_name, msgs_json, html, url, updated_at FROM projects WHERE user_email = ? ORDER BY updated_at DESC"
+      "SELECT id, user_email, app_name, msgs_json, html, url, updated_at, mode FROM projects WHERE user_email = ? ORDER BY updated_at DESC"
     )
     .all(email) as Array<{
       id: string;
@@ -185,6 +197,7 @@ export async function getProjectsByUser(
       html: string;
       url: string;
       updated_at: string;
+      mode: string | null;
     }>;
   return rows.map((r) => ({
     id: r.id,
@@ -195,6 +208,7 @@ export async function getProjectsByUser(
       html: r.html,
       url: r.url,
       updated_at: r.updated_at,
+      mode: modeOf(r.mode),
     },
   }));
 }
@@ -207,6 +221,56 @@ function safeParseMsgs(raw: string): ProjectData["msgs"] {
     return [];
   }
 }
+
+// Fetch one project owned by `userEmail` — used by /api/edit to load the saved
+// mode so the system prompt stays aligned across turns.
+export async function getProject(
+  id: string,
+  userEmail: string,
+): Promise<ProjectData | null> {
+  if (!isSafeProjectId(id)) return null;
+  const r = getDb()
+    .prepare(
+      "SELECT user_email, app_name, msgs_json, html, url, updated_at, mode FROM projects WHERE id = ? AND user_email = ?"
+    )
+    .get(id, userEmail) as
+      | { user_email: string; app_name: string; msgs_json: string; html: string; url: string; updated_at: string; mode: string | null }
+      | undefined;
+  if (!r) return null;
+  return {
+    user_email: r.user_email,
+    appName: r.app_name,
+    msgs: safeParseMsgs(r.msgs_json),
+    html: r.html,
+    url: r.url,
+    updated_at: r.updated_at,
+    mode: modeOf(r.mode),
+  };
+}
+
+// Telemetry: one row per generation/edit/deploy. Reads aggregated by
+// /admin/templates. Best-effort — failures are logged but don't break the flow.
+export function logTemplateUsage(
+  userEmail: string,
+  projectId: string | null,
+  mode: ModeId,
+  kind: "generate" | "edit" | "deploy",
+  placeholderLeak: boolean = false,
+): void {
+  try {
+    getDb()
+      .prepare(
+        "INSERT INTO template_usage (user_email, project_id, mode, kind, placeholder_leak, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+      )
+      .run(userEmail, projectId, mode, kind, placeholderLeak ? 1 : 0, new Date().toISOString());
+  } catch (e) {
+    console.error("[telemetry] logTemplateUsage failed:", e);
+  }
+}
+
+// Suppress unused-import warning for DEFAULT_MODE — kept for callers that want
+// to compare to default in switch statements.
+void DEFAULT_MODE;
 
 export async function deleteProject(id: string, userEmail: string): Promise<boolean> {
   if (!isSafeProjectId(id)) return false;

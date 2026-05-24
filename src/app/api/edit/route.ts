@@ -12,6 +12,8 @@ import { detectPromptViolation, scanGeneratedHtml, checkRateLimit } from "@/lib/
 import { requireSession, authError, type Session } from "@/lib/auth";
 import { getPrimary, getFallback, withFallback, type AiProvider } from "@/lib/ai";
 import { assertQuota, recordUsage, perRequestLimit, maxTurnsFor, weightedTokens } from "@/lib/quota";
+import { APP_MODES, modeOf, type ModeId } from "@/lib/modes";
+import { logTemplateUsage } from "@/lib/store";
 
 // === CLARIFY CACHE ===
 // When the agent asks the user to disambiguate a request, we pause the agent
@@ -157,11 +159,15 @@ export async function POST(req: NextRequest) {
     try { session = await requireSession(); } catch { return authError(); }
 
     const body = await req.json();
-    const { currentHtml, newMessage, clarifyKey } = body as {
+    const { currentHtml, newMessage, clarifyKey, projectId } = body as {
       currentHtml?: string;
       newMessage?: string;
       clarifyKey?: string;
+      projectId?: string;
     };
+    const mode: ModeId = modeOf(body?.mode);
+    const modeHint = APP_MODES[mode].systemHints;
+    const projId = typeof projectId === "string" ? projectId : null;
     if (!currentHtml || !newMessage || typeof currentHtml !== "string" || typeof newMessage !== "string") {
       return new Response(JSON.stringify({ error: "Thiếu dữ liệu" }), {
         status: 400,
@@ -241,8 +247,14 @@ export async function POST(req: NextRequest) {
         .map((f) => `=== ${f.file} ===\n${f.content}`)
         .join("\n\n");
       console.log(`[EDIT] start currentHtml=${currentHtml.length}b relevant=${relevant.length}`);
+      // Append mode hint AFTER the stable agent prompt so the prefix-cached
+      // portion (the big 7K-token AGENT_SYSTEM_PROMPT) still hits cache; only
+      // the mode-specific tail varies.
+      const systemContent = modeHint
+        ? `${AGENT_SYSTEM_PROMPT}\n\n${modeHint}`
+        : AGENT_SYSTEM_PROMPT;
       messages = [
-        { role: "system", content: AGENT_SYSTEM_PROMPT },
+        { role: "system", content: systemContent },
         {
           role: "user",
           content: `SOURCE FILES:\n\n${contextStr}\n\nUSER REQUEST: ${newMessage}`,
@@ -560,8 +572,9 @@ export async function POST(req: NextRequest) {
           sendProgress(`summary ${encodeURIComponent(summary.slice(0, 300))}`);
 
           const billed = weightedTokens(totalPromptTokens, totalCompletionTokens, totalCachedTokens);
-          console.log(`[EDIT] done tools=${toolCalls} in=${totalPromptTokens} (cached=${totalCachedTokens}) out=${totalCompletionTokens} billed=${billed} html=${mergedHtml.length}b`);
+          console.log(`[EDIT] done mode=${mode} tools=${toolCalls} in=${totalPromptTokens} (cached=${totalCachedTokens}) out=${totalCompletionTokens} billed=${billed} html=${mergedHtml.length}b`);
           if (billed > 0) recordUsage(session.email, totalPromptTokens, totalCompletionTokens, totalCachedTokens);
+          logTemplateUsage(session.email, projId, mode, "edit", false);
 
           const outputViolation = scanGeneratedHtml(mergedHtml);
           if (outputViolation) {

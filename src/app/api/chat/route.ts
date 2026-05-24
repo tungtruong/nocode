@@ -3,6 +3,8 @@ import { detectPromptViolation, scanGeneratedHtml, checkRateLimit } from "@/lib/
 import { requireSession, authError, type Session } from "@/lib/auth";
 import { getPrimary, getFallback, createStreamWithFallback, withFallback } from "@/lib/ai";
 import { assertQuota, recordUsage, perRequestLimit, weightedTokens } from "@/lib/quota";
+import { APP_MODES, modeOf, type ModeId } from "@/lib/modes";
+import { logTemplateUsage } from "@/lib/store";
 
 const NEW_APP_PROMPT = `## ROLE
 You are a web app generator. Build ONE complete single-file HTML app matching the user's description.
@@ -26,6 +28,27 @@ You are a web app generator. Build ONE complete single-file HTML app matching th
 - Do not output Lorem Ipsum — use realistic Vietnamese sample data when content is needed.
 
 START NOW with <!DOCTYPE html>`;
+
+// Used when a niche mode (qr_menu, wedding, ...) has a template skeleton. The
+// model receives the template + user request and FILLS placeholders rather
+// than authoring the whole document. Cuts completion tokens ~50-60% vs a
+// from-scratch generation.
+const TEMPLATE_FILL_PROMPT = `## ROLE
+You receive an HTML template skeleton + a user request. Your ONLY job: emit the COMPLETE final HTML by substituting placeholders and expanding fill blocks.
+
+## OUTPUT FORMAT — STRICT
+- Output ONLY raw HTML. No markdown fences. No prose before or after.
+- First character must be "<". Last lines must end with </html>.
+- Replace EVERY {{PLACEHOLDER}} with a real value (no {{X}} can remain in output).
+- Replace EVERY \`<!-- LLM_FILL: ... -->\` block with the HTML the instruction describes.
+- Keep EVERYTHING ELSE byte-identical (CSS, script, layout, classes).
+
+## CONTENT RULES
+- Use realistic Vietnamese values matching the user's request (real names, real prices in VND, real Vietnamese addresses where applicable).
+- Color values: pick a tasteful palette matching the brand/vibe described. Use hex codes.
+- For LLM_FILL blocks, generate enough content to feel finished but not bloated (6-12 items for menus, 4-6 photos for galleries, 3-5 features for landing, 6-9 slides for decks, etc.).
+- Do NOT add sections the template doesn't ask for.
+- Do NOT remove or restructure the template's existing markup.`;
 
 function validateHtml(html: string): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
@@ -74,7 +97,11 @@ export async function POST(req: NextRequest) {
     let session: Session;
     try { session = await requireSession(); } catch { return authError(); }
 
-    const { newMessage } = await req.json();
+    const body = await req.json();
+    const { newMessage, projectId } = body as { newMessage?: unknown; projectId?: unknown };
+    const mode: ModeId = modeOf(body?.mode);
+    const modeDef = APP_MODES[mode];
+    const projId = typeof projectId === "string" ? projectId : null;
 
     if (!newMessage || typeof newMessage !== "string") {
       return NextResponse.json({ error: "Thiếu nội dung" }, { status: 400 });
@@ -129,13 +156,28 @@ export async function POST(req: NextRequest) {
           sendProgress("progress thinking");
           sendProgress("progress generating");
 
+          // Mode dispatch:
+          //   - web_app (no template): generic prompt, larger token budget.
+          //   - niche modes (qr_menu/wedding/...): TEMPLATE_FILL_PROMPT + the
+          //     template skeleton in the user message; tighter token budget
+          //     since the model only fills placeholders, not the whole doc.
+          const usingTemplate = !!modeDef.template;
+          const systemPrompt = usingTemplate
+            ? `${TEMPLATE_FILL_PROMPT}\n\n${modeDef.systemHints}`
+            : NEW_APP_PROMPT;
+          const userPrompt = usingTemplate
+            ? `TEMPLATE:\n${modeDef.template}\n\nUSER REQUEST: ${newMessage}`
+            : newMessage;
+          const maxTokens = usingTemplate ? 6000 : 16000;
+          console.log(`[Chat] mode=${mode} template=${usingTemplate} maxTokens=${maxTokens}`);
+
           const { stream: genStream } = await createStreamWithFallback({
             messages: [
-              { role: "system", content: NEW_APP_PROMPT },
-              { role: "user", content: newMessage },
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt },
             ],
-            temperature: 0.7,
-            max_tokens: 16000,
+            temperature: usingTemplate ? 0.5 : 0.7,
+            max_tokens: maxTokens,
           }, (reason) => {
             console.log(`[Chat] fallback to OpenAI for gen: ${reason}`);
             sendProgress("progress fallback");
@@ -235,6 +277,16 @@ export async function POST(req: NextRequest) {
           // Output-side safety scan. If the final HTML looks malicious, replace
           // with a blocked page (and tell client to reset preview first).
           const final = cleanHtml(accumulated);
+
+          // Template telemetry: log every generation + flag if any {{X}}
+          // placeholder slipped through (catches model failures so we can
+          // tighten the template / prompt next iteration).
+          const placeholderLeak = usingTemplate && /\{\{[A-Z_]+\}\}/.test(final);
+          logTemplateUsage(session.email, projId, mode, "generate", placeholderLeak);
+          if (placeholderLeak) {
+            console.warn(`[Chat] placeholder leak in mode=${mode} project=${projId}`);
+          }
+
           const contentViolation = scanGeneratedHtml(final);
           if (contentViolation) {
             sendProgress("reset");
