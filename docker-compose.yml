@@ -1,32 +1,47 @@
 # Deploy file used on the production server. Run with:
 #   docker compose pull && docker compose up -d
 #
-# Volumes:
+# Conflict-friendly defaults:
+#   - Bound to 127.0.0.1 only (no public port grab; nginx/caddy proxies).
+#   - HOST_PORT default 3000, override via env if 3000 is taken on the host:
+#       echo "HOST_PORT=3100" >> .env  # then `docker compose up -d`
+#   - Container name uses the COMPOSE_PROJECT_NAME prefix so it co-exists
+#     with any unrelated container also called "justvibe".
+#   - Own Docker network instead of `default`.
+#
+# Persistent volumes:
 #   ./data         → SQLite database + legacy JSON
 #   ./public/apps  → deployed user HTML files
-# Both must persist across deploys; never bake them into the image.
+# Both must survive image rebuilds; never bake them into the image.
 #
 # Env: copy .env.example → .env on the server and fill in real values.
 
+name: justvibe
+
 services:
-  justvibe:
+  app:
     # CI publishes images here; pin :latest or :sha-<commit> if you want
     # explicit rollback control.
     image: ghcr.io/tungtruong/nocode:latest
-    container_name: justvibe
     restart: unless-stopped
     ports:
-      # Bind to localhost only; nginx/caddy in front terminates TLS and
-      # proxies to this. Drop `127.0.0.1:` if exposing directly.
-      - "127.0.0.1:3000:3000"
+      # Bind to 127.0.0.1 only — nginx/caddy in front terminates TLS and
+      # proxies here. Change HOST_PORT in .env if 3000 is already in use.
+      - "127.0.0.1:${HOST_PORT:-3000}:3000"
     env_file:
       - .env
     volumes:
       - ./data:/app/data
       - ./public/apps:/app/public/apps
+    networks:
+      - justvibe
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/auth/me').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 30s
+
+networks:
+  justvibe:
+    name: justvibe-net

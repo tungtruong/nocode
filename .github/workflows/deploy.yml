@@ -70,12 +70,36 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT || 22 }}
           # On the server, DEPLOY_DIR holds docker-compose.yml + .env + data/
-          # + public/apps/. We log into GHCR (so private images work), pull
-          # the new image, run docker compose up -d, then prune stale images
-          # to keep disk usage in check.
+          # + public/apps/. We:
+          #   1. Print diagnostic state up-front (so a failed run's log
+          #      tells us why — wrong dir, missing compose, etc.).
+          #   2. Make sure the working dir + persistent dirs exist.
+          #   3. Pull the docker-compose.yml from the repo so a code change
+          #      to it ships without re-bootstrapping the server.
+          #   4. Re-login to GHCR (per-step token, expires in an hour).
+          #   5. Pull + up + prune.
           script: |
-            cd ${{ secrets.DEPLOY_DIR }}
+            set -e
+            echo "=== Diagnostics ==="
+            echo "Host: $(hostname)"
+            echo "User: $(whoami)"
+            echo "Dir:  ${{ secrets.DEPLOY_DIR }}"
+            echo "Docker: $(docker --version 2>&1 || echo 'NOT INSTALLED')"
+            echo "Compose: $(docker compose version 2>&1 || echo 'NOT INSTALLED')"
+            echo "Port 3000 occupied by: $(ss -ltnp 2>/dev/null | awk '$4 ~ /:3000$/ {print $0}' || echo 'free')"
+            echo ""
+
+            cd ${{ secrets.DEPLOY_DIR }} || { echo "DEPLOY_DIR=${{ secrets.DEPLOY_DIR }} does not exist"; exit 1; }
+
+            # Keep docker-compose.yml in sync with whatever the repo ships.
+            # Server-local edits in .env are preserved (separate file).
+            curl -fsSL -o docker-compose.yml \
+              https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/docker-compose.yml
+
+            mkdir -p data public/apps
+
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker compose pull
             docker compose up -d
+            docker compose ps
             docker image prune -f
