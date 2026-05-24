@@ -65,45 +65,78 @@ jobs:
     steps:
       - name: SSH to server, pull & restart
         uses: appleboy/ssh-action@v1
+        env:
+          DEPLOY_ENV_CONTENT: ${{ secrets.DEPLOY_ENV }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+          GH_REPO: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT || 22 }}
+          # Forward the env vars above to the remote shell.
+          envs: DEPLOY_ENV_CONTENT,DEPLOY_DIR,GH_TOKEN,GH_ACTOR,GH_REPO,GH_SHA
           # appleboy/ssh-action defaults to 5 retries — that's what tripped
           # fail2ban on the first failed run. Fail fast instead.
           timeout: 30s
           command_timeout: 5m
-          # On the server, DEPLOY_DIR holds docker-compose.yml + .env + data/
-          # + public/apps/. We:
-          #   1. Print diagnostic state up-front (so a failed run's log
-          #      tells us why — wrong dir, missing compose, etc.).
-          #   2. Make sure the working dir + persistent dirs exist.
-          #   3. Pull the docker-compose.yml from the repo so a code change
-          #      to it ships without re-bootstrapping the server.
-          #   4. Re-login to GHCR (per-step token, expires in an hour).
-          #   5. Pull + up + prune.
+          # Self-bootstrapping deploy. The server only needs:
+          #   - SSH access (DEPLOY_HOST/USER/KEY secrets)
+          #   - That user has sudo or is root
+          # This script handles: install docker, create dirs, write .env from
+          # DEPLOY_ENV secret on first run (preserves manual edits afterwards),
+          # pull docker-compose.yml from repo, login GHCR, pull image, up.
           script: |
             set -e
+
+            # Bootstrap: install docker + compose plugin if missing.
+            if ! command -v docker >/dev/null 2>&1; then
+              echo "[bootstrap] Installing Docker..."
+              curl -fsSL https://get.docker.com | sh
+            fi
+            if ! docker compose version >/dev/null 2>&1; then
+              echo "[bootstrap] Installing docker-compose-plugin..."
+              apt-get update -qq && apt-get install -y docker-compose-plugin
+            fi
+
             echo "=== Diagnostics ==="
             echo "Host: $(hostname)"
             echo "User: $(whoami)"
-            echo "Dir:  ${{ secrets.DEPLOY_DIR }}"
-            echo "Docker: $(docker --version 2>&1 || echo 'NOT INSTALLED')"
-            echo "Compose: $(docker compose version 2>&1 || echo 'NOT INSTALLED')"
+            echo "Dir:  $DEPLOY_DIR"
+            echo "Docker: $(docker --version)"
+            echo "Compose: $(docker compose version)"
             echo "Port 3000 occupied by: $(ss -ltnp 2>/dev/null | awk '$4 ~ /:3000$/ {print $0}' || echo 'free')"
             echo ""
 
-            cd ${{ secrets.DEPLOY_DIR }} || { echo "DEPLOY_DIR=${{ secrets.DEPLOY_DIR }} does not exist"; exit 1; }
+            # Bootstrap: create deploy dir if missing.
+            mkdir -p "$DEPLOY_DIR/data" "$DEPLOY_DIR/public/apps"
+            cd "$DEPLOY_DIR"
 
             # Keep docker-compose.yml in sync with whatever the repo ships.
-            # Server-local edits in .env are preserved (separate file).
             curl -fsSL -o docker-compose.yml \
-              https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/docker-compose.yml
+              "https://raw.githubusercontent.com/$GH_REPO/$GH_SHA/docker-compose.yml"
 
-            mkdir -p data public/apps
+            # First-run only: write .env from DEPLOY_ENV secret. After that,
+            # preserve whatever's on disk (lets you edit on the server without
+            # the next deploy overwriting it).
+            if [ ! -f .env ]; then
+              if [ -z "$DEPLOY_ENV_CONTENT" ]; then
+                echo "❌ .env missing on server AND DEPLOY_ENV secret is empty."
+                echo "   Set DEPLOY_ENV secret in repo Settings → Secrets → Actions"
+                echo "   (paste the full .env content)."
+                exit 1
+              fi
+              echo "[bootstrap] Writing .env from DEPLOY_ENV secret..."
+              printf '%s' "$DEPLOY_ENV_CONTENT" > .env
+              chmod 600 .env
+            else
+              echo "[bootstrap] .env exists, preserving server-local edits."
+            fi
 
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
             docker compose pull
             docker compose up -d
             docker compose ps
