@@ -2,25 +2,51 @@ import { getDb } from "@/lib/db";
 
 export type Tier = "free" | "pro" | "team";
 
-// Monthly token budgets per tier. Calibration: a typical "create app" call
-// burns 5–15k tokens, an edit call 20–50k. So 200k ≈ 10–20 actions; pro tier
-// is generous enough for daily power use; team is org-scale.
+// === PRICING MODEL ===
+//
+// DeepSeek charges input and output tokens at very different rates (output is
+// ~4× input). Charging users on raw `total_tokens` would either undercharge
+// long replies or overcharge short ones, so we normalize to "weighted tokens"
+// where 1 weighted token = 1 input token = (1 / OUTPUT_TO_INPUT_RATIO) of an
+// output token. Quotas are denominated in weighted tokens.
+//
+// Reference DeepSeek V3 chat rates (2025):
+//   input  cache-miss   $0.27 / 1M
+//   output              $1.10 / 1M
+//   → OUTPUT_TO_INPUT_RATIO = 1.10 / 0.27 ≈ 4.07
+//
+// Cost per weighted token (= input token cost): $0.27 / 1M = $0.00000027.
+// Paid plans sized so price covers DeepSeek cost with a 4× gross margin:
+//
+//   Plan   Price/mo   Cost target (price/4)   Weighted-token budget
+//   Free   $0         — (subsidized)          1,000,000
+//   Pro    $12        $3                      $3   / $0.27/M = 11,000,000
+//   Team   $39        $9.75                   $9.75/ $0.27/M = 36,000,000
+//
+// Recalibrate when DeepSeek rates or the fallback (OpenAI) mix changes.
+export const INPUT_RATE_PER_TOKEN = 0.27 / 1_000_000;   // USD per input token
+export const OUTPUT_RATE_PER_TOKEN = 1.10 / 1_000_000;  // USD per output token
+export const OUTPUT_TO_INPUT_RATIO = OUTPUT_RATE_PER_TOKEN / INPUT_RATE_PER_TOKEN;
+
+export function weightedTokens(promptTokens: number, completionTokens: number): number {
+  return Math.round((promptTokens || 0) + (completionTokens || 0) * OUTPUT_TO_INPUT_RATIO);
+}
+
 export const TIER_LIMITS: Record<Tier, number> = {
-  free: 200_000,
-  pro: 5_000_000,
-  team: 50_000_000,
+  free: 1_000_000,
+  pro: 11_000_000,
+  team: 36_000_000,
 };
 
-// Hard cap per single request. Sized at ~75% of the monthly quota so a
-// legitimate multi-component edit ("add 3 tabs at the bottom" ≈ 150k tokens
-// observed) goes through, while a runaway loop is still bounded before it
-// can drain more than one user's worth of monthly budget. The point is to
-// catch obvious bugs (model emits a million-token reply or infinite tool
-// loop), not to force users to manually slice every feature.
+// Hard cap per single request (weighted tokens). Sized at ~50% of the monthly
+// quota so a legitimate multi-component edit ("add 3 tabs at the bottom"
+// ≈ 150k weighted tokens observed) goes through with room to spare, while a
+// runaway loop or pathological prompt is bounded before it can drain more
+// than half a month's budget.
 export const PER_REQUEST_LIMITS: Record<Tier, number> = {
-  free: 150_000,
-  pro: 1_000_000,
-  team: 5_000_000,
+  free: 500_000,
+  pro: 5_500_000,
+  team: 18_000_000,
 };
 
 // Per-request hard maxTurns (latency cap). Independent of token cap — protects
@@ -98,11 +124,13 @@ export function assertQuota(email: string): UsageInfo {
   return info;
 }
 
-// Increment usage. Called AFTER each LLM round-trip with the actual token count
-// reported by the provider. UPSERT in one statement so concurrent edits don't
-// race.
-export function recordUsage(email: string, tokens: number): void {
-  if (!tokens || tokens < 0) return;
+// Increment usage. Pass input + output tokens separately from the LLM provider
+// (response.usage.prompt_tokens, completion_tokens). We store the *weighted*
+// total in tokens_used so the quota check and the LLM bill stay aligned even
+// when a request has an unusually output-heavy ratio.
+export function recordUsage(email: string, promptTokens: number, completionTokens: number): void {
+  const weighted = weightedTokens(promptTokens, completionTokens);
+  if (weighted <= 0) return;
   const period = currentPeriod();
   getDb()
     .prepare(
@@ -113,5 +141,5 @@ export function recordUsage(email: string, tokens: number): void {
          requests = requests + 1,
          updated_at = datetime('now')`
     )
-    .run(email, period, tokens);
+    .run(email, period, weighted);
 }

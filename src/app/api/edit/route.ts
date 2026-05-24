@@ -9,7 +9,7 @@ import { getToolDefinitions, executeTool } from "@/lib/tools";
 import { detectPromptViolation, scanGeneratedHtml, checkRateLimit } from "@/lib/security";
 import { requireSession, authError, type Session } from "@/lib/auth";
 import { getPrimary, getFallback, withFallback, type AiProvider } from "@/lib/ai";
-import { assertQuota, recordUsage, perRequestLimit, maxTurnsFor } from "@/lib/quota";
+import { assertQuota, recordUsage, perRequestLimit, maxTurnsFor, weightedTokens } from "@/lib/quota";
 
 const AGENT_SYSTEM_PROMPT = `## ROLE
 You are a web app editor inside a no-code builder. Your ONLY job: read and edit HTML/CSS/JS source files of a web application. Nothing else.
@@ -165,7 +165,10 @@ export async function POST(req: NextRequest) {
       },
     ];
 
-    let totalTokens = 0;
+    // Track input + output separately — output is ~4× the cost per token on
+    // DeepSeek, so quota math must weight them differently.
+    let totalPromptTokens = 0;
+    let totalCompletionTokens = 0;
     let toolCalls = 0;
     const encoder = new TextEncoder();
 
@@ -209,8 +212,9 @@ export async function POST(req: NextRequest) {
         try {
         while (turn < maxTurns) {
           if (closed) return;
-          if (totalTokens >= tokenBudget) {
-            console.log(`[EDIT] per-request token budget hit (${totalTokens}/${tokenBudget}) — stopping agent`);
+          const billedSoFar = weightedTokens(totalPromptTokens, totalCompletionTokens);
+          if (billedSoFar >= tokenBudget) {
+            console.log(`[EDIT] per-request token budget hit (${billedSoFar}/${tokenBudget} weighted) — stopping agent`);
             break;
           }
           turn++;
@@ -245,7 +249,10 @@ export async function POST(req: NextRequest) {
           }
 
           const usage = response.usage;
-          if (usage?.total_tokens) totalTokens += usage.total_tokens;
+          if (usage) {
+            totalPromptTokens += usage.prompt_tokens || 0;
+            totalCompletionTokens += usage.completion_tokens || 0;
+          }
 
           const msg = response.choices[0]?.message;
           if (!msg) break;
@@ -416,8 +423,9 @@ export async function POST(req: NextRequest) {
 
           sendProgress(`summary ${encodeURIComponent(summary.slice(0, 300))}`);
 
-          console.log(`[EDIT] done tools=${toolCalls} tokens=${totalTokens} out=${mergedHtml.length}b`);
-          if (totalTokens > 0) recordUsage(session.email, totalTokens);
+          const billed = weightedTokens(totalPromptTokens, totalCompletionTokens);
+          console.log(`[EDIT] done tools=${toolCalls} in=${totalPromptTokens} out=${totalCompletionTokens} billed=${billed} html=${mergedHtml.length}b`);
+          if (billed > 0) recordUsage(session.email, totalPromptTokens, totalCompletionTokens);
 
           const outputViolation = scanGeneratedHtml(mergedHtml);
           if (outputViolation) {
@@ -430,7 +438,7 @@ export async function POST(req: NextRequest) {
             return;
           }
 
-          sendProgress(`done ${toolCalls} tools ${totalTokens} tokens`);
+          sendProgress(`done ${toolCalls} tools ${billed} tokens`);
 
           const htmlBytes = encoder.encode(mergedHtml);
           const chunkSize = 2048;
@@ -447,17 +455,18 @@ export async function POST(req: NextRequest) {
         // unchanged: partial edits typically leave JS event handlers wired
         // to HTML elements that were never added, which throws null-pointer
         // errors and silently breaks every button in the app.
-        const hitTokenCap = totalTokens >= tokenBudget;
+        const billedFallback = weightedTokens(totalPromptTokens, totalCompletionTokens);
+        const hitTokenCap = billedFallback >= tokenBudget;
         const reason = hitTokenCap
-          ? `Yêu cầu hơi lớn nên AI chưa hoàn thành kịp (đã dùng ${totalTokens.toLocaleString()} tokens). App vẫn giữ nguyên, lần này không tính vào quota của bạn. Bạn có thể thử lại với prompt cụ thể hơn hoặc nâng gói lên Pro để xử lý các thay đổi lớn.`
+          ? `Yêu cầu hơi lớn nên AI chưa hoàn thành kịp (đã dùng ${billedFallback.toLocaleString()} tokens). App vẫn giữ nguyên, lần này không tính vào quota của bạn. Bạn có thể thử lại với prompt cụ thể hơn hoặc nâng gói lên Pro để xử lý các thay đổi lớn.`
           : "Yêu cầu hơi phức tạp, AI cần thêm bước. App vẫn giữ nguyên, lần này không tính vào quota. Thử lại với mô tả cụ thể hơn nhé.";
         sendProgress(`summary ${encodeURIComponent(reason)}`);
-        sendProgress(`done ${toolCalls} tools ${totalTokens} tokens (refunded)`);
+        sendProgress(`done ${toolCalls} tools ${billedFallback} tokens (refunded)`);
         // DELIBERATELY no recordUsage here: the user didn't get a working
         // change, so charging them for the failed attempt is unfair. The
         // upstream LLM cost is absorbed by the platform — bounded by the
         // rate limit + maxTurns + tokenBudget that already fired.
-        console.log(`[EDIT] refunded ${totalTokens} tokens (capHit=${hitTokenCap}, turns=${turn}/${maxTurns})`);
+        console.log(`[EDIT] refunded in=${totalPromptTokens} out=${totalCompletionTokens} weighted=${billedFallback} (capHit=${hitTokenCap}, turns=${turn}/${maxTurns})`);
 
         const fallbackBytes = encoder.encode(currentHtml);
         const fallbackChunkSize = 2048;

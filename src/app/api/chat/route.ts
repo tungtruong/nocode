@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { detectPromptViolation, scanGeneratedHtml, checkRateLimit } from "@/lib/security";
 import { requireSession, authError, type Session } from "@/lib/auth";
 import { getPrimary, getFallback, createStreamWithFallback, withFallback } from "@/lib/ai";
-import { assertQuota, recordUsage, perRequestLimit } from "@/lib/quota";
+import { assertQuota, recordUsage, perRequestLimit, weightedTokens } from "@/lib/quota";
 
 const NEW_APP_PROMPT = `## ROLE
 You are a web app generator. Build ONE complete single-file HTML app matching the user's description.
@@ -142,7 +142,8 @@ export async function POST(req: NextRequest) {
           });
 
           let accumulated = "";
-          let totalTokens = 0;
+          let promptTokens = 0;
+          let completionTokens = 0;
           for await (const chunk of genStream) {
             if (closed) break;
             const content = chunk.choices[0]?.delta?.content || "";
@@ -151,13 +152,17 @@ export async function POST(req: NextRequest) {
               sendChunk(content);
             }
             // stream_options.include_usage delivers totals in the final chunk
-            if (chunk.usage?.total_tokens) totalTokens = chunk.usage.total_tokens;
+            if (chunk.usage) {
+              promptTokens = chunk.usage.prompt_tokens || 0;
+              completionTokens = chunk.usage.completion_tokens || 0;
+            }
           }
-          if (totalTokens > 0) recordUsage(session.email, totalTokens);
+          let billedTokens = weightedTokens(promptTokens, completionTokens);
+          if (billedTokens > 0) recordUsage(session.email, promptTokens, completionTokens);
           // If the gen call alone blew through the per-request budget, skip
           // fix + summary (both cost more tokens) and ship what we have.
           const tokenBudget = perRequestLimit(session.email);
-          const overBudget = totalTokens >= tokenBudget;
+          const overBudget = billedTokens >= tokenBudget;
 
           if (closed) return;
 
@@ -197,7 +202,8 @@ export async function POST(req: NextRequest) {
               });
 
               let fixed = "";
-              let fixTokens = 0;
+              let fixPrompt = 0;
+              let fixCompletion = 0;
               for await (const chunk of fixStream) {
                 if (closed) break;
                 const content = chunk.choices[0]?.delta?.content || "";
@@ -205,9 +211,14 @@ export async function POST(req: NextRequest) {
                   fixed += content;
                   sendChunk(content);
                 }
-                if (chunk.usage?.total_tokens) fixTokens = chunk.usage.total_tokens;
+                if (chunk.usage) {
+                  fixPrompt = chunk.usage.prompt_tokens || 0;
+                  fixCompletion = chunk.usage.completion_tokens || 0;
+                }
               }
-              if (fixTokens > 0) recordUsage(session.email, fixTokens);
+              const fixBilled = weightedTokens(fixPrompt, fixCompletion);
+              if (fixBilled > 0) recordUsage(session.email, fixPrompt, fixCompletion);
+              billedTokens += fixBilled;
               if (fixed.trim()) accumulated = fixed;
             }
           }
@@ -258,7 +269,7 @@ export async function POST(req: NextRequest) {
               });
             }, (reason) => console.log(`[Chat] fallback to OpenAI for summary: ${reason}`));
             const summaryText = (summaryResp.choices[0]?.message?.content || "").trim();
-            if (summaryResp.usage?.total_tokens) recordUsage(session.email, summaryResp.usage.total_tokens);
+            if (summaryResp.usage) recordUsage(session.email, summaryResp.usage.prompt_tokens || 0, summaryResp.usage.completion_tokens || 0);
             if (summaryText) {
               sendProgress(`summary ${encodeURIComponent(summaryText.slice(0, 600))}`);
             }
