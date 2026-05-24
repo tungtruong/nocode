@@ -154,11 +154,16 @@ export function scanGeneratedHtml(html: string): Violation | null {
     return { category: "malware", reason: "Generated content contains suspicious JavaScript" };
   }
 
-  // Adult content patterns
+  // Adult content patterns — require explicit context to avoid false positives
+  // on words like "adult education", "explicit type", "nude color", "naked CSS".
+  // Input-side scan in CONTENT_CATEGORIES already catches user intent; this is
+  // a safety net for output that drifted into actual adult material.
+  const text = html.replace(/<[^>]*>/g, "");
   if (
-    /(porn|xxx|adult|explicit|nude|naked|sexual)/i.test(
-      html.replace(/<[^>]*>/g, "") // strip HTML tags for text analysis
-    )
+    /\b(porn|pornograph|xxx)\b/i.test(text) ||
+    /\b(escort|prostitut|brothel)\b/i.test(text) ||
+    /\b(sexual|explicit|adult|nude|naked)\s+(content|material|image|photo|video|scene)\b/i.test(text) ||
+    /\bsexual\s*(act|intercourse|fetish)\b/i.test(text)
   ) {
     return { category: "adult", reason: "Generated content contains adult material" };
   }
