@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import fs from "fs/promises";
 import path from "path";
 import { requireSession, authError } from "@/lib/auth";
-import { addApp, pickSlug } from "@/lib/store";
+import { addApp, getApp, pickSlug } from "@/lib/store";
 
 const MAX_HTML_SIZE = 5 * 1024 * 1024; // 5MB
 
@@ -21,12 +21,18 @@ function appUrl(slug: string, id: string): string {
   return `${baseUrl}/apps/${id}`;
 }
 
+// Same shape as the internal isSafeId() in store.ts — must match or addApp
+// will reject the id we hand it.
+function isSafeId(id: string): boolean {
+  return typeof id === "string" && /^[a-zA-Z0-9_-]{6,64}$/.test(id);
+}
+
 export async function POST(req: NextRequest) {
   try {
     let session;
     try { session = await requireSession(); } catch { return authError(); }
 
-    const { html, title } = await req.json();
+    const { html, title, projectId } = await req.json();
 
     if (!html || typeof html !== "string") {
       return NextResponse.json({ error: "Thiếu nội dung HTML" }, { status: 400 });
@@ -36,15 +42,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "File quá lớn (tối đa 5MB)" }, { status: 400 });
     }
 
-    // Full UUID (with dashes stripped) — 32 hex chars. The previous 8-char prefix
-    // was enumerable (~4.3B combinations); a full UUID raises that to ~2^122.
-    const id = uuidv4().replace(/-/g, "");
+    // Re-deploy: if the client passes its projectId AND that id is already
+    // tied to this user's app, reuse it so the same /apps/<id> + slug +
+    // public URL keep pointing at the new HTML. New project IDs get a fresh
+    // UUID so two projects can never collide.
+    let id: string;
+    let existingSlug: string | null = null;
+    if (projectId && isSafeId(projectId)) {
+      const existing = await getApp(projectId);
+      if (existing) {
+        if (existing.user_email !== session.email) {
+          return NextResponse.json({ error: "Không có quyền" }, { status: 403 });
+        }
+        id = projectId;
+        existingSlug = existing.slug ?? null;
+      } else {
+        // First deploy for this project — use the projectId itself as the
+        // app id so subsequent deploys are idempotent.
+        id = projectId;
+      }
+    } else {
+      // Legacy: caller didn't send projectId, fall back to fresh UUID.
+      id = uuidv4().replace(/-/g, "");
+    }
+
     const dir = path.join(process.cwd(), "public", "apps", id);
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "index.html"), html, "utf-8");
 
-    // Slug = pretty URL component, picked once and persisted with the app.
-    const slug = pickSlug(title || "app", id);
+    // Preserve the slug across re-deploys; only allocate one on first deploy.
+    const slug = existingSlug ?? pickSlug(title || "app", id);
     const url = appUrl(slug, id);
 
     try {

@@ -246,7 +246,7 @@ export default function BuilderPage() {
       const r = await fetch("/api/deploy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html: h, title: appName || "Untitled" }),
+        body: JSON.stringify({ html: h, title: appName || "Untitled", projectId: appId }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Deploy thất bại");
@@ -259,7 +259,7 @@ export default function BuilderPage() {
     } finally {
       setDeploying(false);
     }
-  }, [appName]);
+  }, [appName, appId]);
 
   // Click handler for the combined Deploy / Open button: if the current
   // HTML is newer than what's deployed (or nothing deployed yet), publish
