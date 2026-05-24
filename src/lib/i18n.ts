@@ -44,6 +44,9 @@ export const t = {
     loginError: "Sai thông tin đăng nhập",
     loginDemo: "Demo:",
     loginNoAccount: "Chưa có tài khoản?",
+    loginGoogle: "Tiếp tục với Google",
+    loginEmailFallback: "Dùng email & mật khẩu",
+    loginOAuthError: "Đăng nhập thất bại",
     signup: "Đăng ký",
     signupTitle: "Tạo tài khoản",
     signupSub: "Bắt đầu dựng app trong 30 giây",
@@ -57,6 +60,7 @@ export const t = {
     signupPasswordHint: "Tối thiểu 8 ký tự",
     signupHaveAccount: "Đã có tài khoản?",
     signupReferralBadge: "Đăng ký qua link giới thiệu — mã:",
+    signupEmailFallback: "Hoặc dùng email & mật khẩu",
 
     // Pricing
     pricingTitle: "Bảng giá rõ ràng, minh bạch",
@@ -215,6 +219,9 @@ export const t = {
     loginError: "Invalid credentials",
     loginDemo: "Demo:",
     loginNoAccount: "No account?",
+    loginGoogle: "Continue with Google",
+    loginEmailFallback: "Use email & password",
+    loginOAuthError: "Sign-in failed",
     signup: "Sign up",
     signupTitle: "Create your account",
     signupSub: "Start building in 30 seconds",
@@ -228,6 +235,7 @@ export const t = {
     signupPasswordHint: "Minimum 8 characters",
     signupHaveAccount: "Already have an account?",
     signupReferralBadge: "Signing up via referral — code:",
+    signupEmailFallback: "Or use email & password",
 
     // Pricing
     pricingTitle: "Simple, transparent pricing",

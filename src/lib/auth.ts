@@ -86,6 +86,9 @@ export function validateCredentials(email: string, password: string): { name: st
     .prepare("SELECT name, password_hash FROM users WHERE email = ?")
     .get(e) as { name: string; password_hash: string } | undefined;
   if (row) {
+    // Accounts created via Google OAuth have a sentinel hash and no password
+    // — they must sign in through the OAuth flow, not the password form.
+    if (row.password_hash === "OAUTH") return null;
     if (bcrypt.compareSync(password, row.password_hash)) return { name: row.name };
     return null;
   }
