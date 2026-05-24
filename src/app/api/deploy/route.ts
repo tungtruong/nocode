@@ -22,7 +22,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "File quá lớn (tối đa 5MB)" }, { status: 400 });
     }
 
-    const id = uuidv4().slice(0, 8);
+    // Full UUID (with dashes stripped) — 32 hex chars. The previous 8-char prefix
+    // was enumerable (~4.3B combinations); a full UUID raises that to ~2^122.
+    const id = uuidv4().replace(/-/g, "");
     const dir = path.join(process.cwd(), "public", "apps", id);
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "index.html"), html, "utf-8");

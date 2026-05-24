@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import OpenAI from "openai";
+import type OpenAI from "openai";
 import {
   parseHtmlToFiles,
   mergeFilesToHtml,
@@ -8,6 +8,8 @@ import {
 import { getToolDefinitions, executeTool } from "@/lib/tools";
 import { detectPromptViolation, scanGeneratedHtml, checkRateLimit } from "@/lib/security";
 import { requireSession, authError, type Session } from "@/lib/auth";
+import { getPrimary, getFallback, withFallback, type AiProvider } from "@/lib/ai";
+import { assertQuota, recordUsage, perRequestLimit, maxTurnsFor } from "@/lib/quota";
 
 const AGENT_SYSTEM_PROMPT = `## ROLE
 You are a web app editor inside a no-code builder. Your ONLY job: read and edit HTML/CSS/JS source files of a web application. Nothing else.
@@ -20,41 +22,71 @@ You are a web app editor inside a no-code builder. Your ONLY job: read and edit 
 - You do NOT have access to git, npm, shell, or any system tools.
 - You CANNOT browse the web, fetch URLs, or access external APIs.
 
-## YOUR TOOLS (read-only virtual filesystem)
-- read_file(path) — Read a file from the app's source. You MUST read before editing.
-- edit_file(path, old_string, new_string, replace_all) — Surgical string replacement.
-- write_file(path, content) — Create a completely new file only.
-- grep(pattern) — Search for text across all files.
+## YOUR TOOLS (virtual filesystem only — never the real disk)
+- read_file(path)
+- edit_file(path, old_string, new_string, replace_all)
+- write_file(path, content)
+- grep(pattern)
+
+## FILE STRUCTURE
+- /style.css — All CSS styles. EDIT HERE for color, layout, spacing, animation, theme changes.
+- /script.js — All JavaScript logic. EDIT HERE for behavior, events, data, validation.
+- /index.html — HTML markup ONLY. The <style> and <script> blocks here are auto-rebuilt from /style.css and /script.js on output. Do NOT edit CSS or JS inside /index.html — your edits there will be discarded. Only edit /index.html to add/remove/restructure HTML elements (divs, buttons, forms).
+
+## SANDBOX CONSTRAINTS — CRITICAL
+The preview runs inside a sandboxed iframe with NO same-origin access. This means:
+- localStorage, sessionStorage, document.cookie all THROW SecurityError at runtime.
+- If you write \`localStorage.getItem(...)\` or similar, the entire <script> crashes and EVERY button on the page stops working.
+- Keep all state in JavaScript variables (\`let theme = 'dark';\`). To persist visually, just set the default on load.
+- If the user asks for "remember my choice" or "save", briefly say in the reply that persistence isn't available in preview, then implement in-memory state only.
 
 ## EDITING RULES
-1. READ FIRST. Always call read_file to see exact file content before editing.
-2. PRESERVE EVERYTHING. Never remove or change code the user didn't ask about.
-3. SMALLEST EDIT. What is the minimum change that satisfies the request?
-4. APPEND, DON'T REPLACE. When adding features, add new code after existing code.
-5. EXACT MATCH. The old_string in edit_file must match the file character-for-character.
-6. EDIT FAILS if old_string is not found or appears multiple times. If it fails, re-read the file and try again with corrected old_string. Keep trying until it succeeds.
-
-## SELF-CHECK BEFORE FINISHING
-After all edits, you MUST verify:
-1. CRITICAL: Does every new CSS class (e.g. .dark-toggle, .theme-btn) have an actual HTML element using it? Read /index.html and CHECK.
-2. CRITICAL: Does every new JS function have an HTML element that calls it? If you created toggleDark(), there MUST be a button that calls it.
-3. CRITICAL: Every feature with JS logic MUST have visible UI (button, toggle, text, form).
-4. If ANY of the above is missing, fix it NOW before responding.
-5. Read all files one final time to confirm every new element actually exists in the HTML.
-5. If anything is missing, fix it now. Do not respond until everything is complete.
+1. READ FIRST. Always call read_file before editing. But for a single-line color/text change, you may skip reading if you already saw the file in context.
+2. PRESERVE EVERYTHING. Never remove or change code the user didn't ask about. EXCEPTION: if you spot an existing \`localStorage\`/\`sessionStorage\`/\`document.cookie\` call (likely added by a previous turn before this rule existed), DELETE or replace with an in-memory variable — it will crash the page otherwise.
+3. SMALLEST EDIT. What is the minimum change that satisfies the request? Pick ONE concrete change, not three.
+4. EXACT MATCH. The old_string in edit_file must match the file character-for-character. If edit_file fails, re-read the file and retry with a corrected old_string.
+5. AMBIGUOUS REQUEST. If the user request is vague (e.g. "make it better", "đẹp hơn", "tốt hơn"), DO ONLY ONE small improvement:
+   - "đẹp hơn" → add ONE subtle shadow OR adjust ONE spacing value. Do NOT change palette, layout, or fonts.
+   - "tốt hơn" → tighten ONE existing interaction. Do NOT add new features.
+   - When in doubt, prefer no change over wrong change. You may reply with a question instead.
+6. BUDGET. Small change → 1-2 tool calls. Mid feature → 3-6 tool calls. Multi-part feature (tabs + content + state) → up to 10 tool calls. If you're past 10 without converging, simplify aggressively and finish — better a smaller working change than nothing.
+7. BATCH EDITS. When you know multiple edits up-front (e.g. add HTML + CSS + JS for a new feature), prefer calling several edit_file in ONE response rather than one per turn. Each turn round-trip costs latency.
 
 ## WHEN USER SAYS "add X"
-- "add dark mode" → MUST add: (A) new CSS rules for dark theme, (B) JavaScript toggle logic with localStorage, AND (C) a visible toggle button in HTML. Do NOT skip any of these.
+- "add dark mode" → MUST add all three: (A) CSS rules for dark theme, (B) JavaScript toggle logic with localStorage, (C) a visible toggle button in HTML.
 - "change color" → Edit ONLY that color value. Do NOT touch other CSS.
 - "add a button" → Insert ONE element. Do NOT rewrite the surrounding HTML.
 
-## FILE STRUCTURE
-- /style.css — All CSS styles
-- /script.js — All JavaScript logic  
-- /index.html — Full HTML (CSS/JS shown as slim placeholders: "/* see /style.css */")
+## SELF-CHECK BEFORE FINISHING (silent — do not narrate)
+Before your final reply, mentally verify:
+- Every newly added CSS class actually appears on an HTML element.
+- Every newly added JS function is wired to an HTML element (onclick=, addEventListener, etc.).
+- Every new feature has visible UI (button, toggle, form, text).
+If anything is missing, fix it with another edit_file call. Do not mention this check in your reply.
 
-## AFTER EDITING
-State concisely what you changed using simple everyday language. Do NOT mention file names, CSS properties, or technical code details. Example: "Đã thêm nút chuyển sáng/tối" instead of "Added dark-toggle button to /index.html". Keep it under 1 sentence.`;
+## REPLY FORMAT — STRICT
+Your final reply must be 2–3 short Vietnamese sentences for a non-technical user. Structure:
+
+1. **What changed (visible)** — "Đã thêm/đổi/xóa X ở Y."
+2. **Where to see it / how it behaves** — "Bạn sẽ thấy ... khi bấm/khi mở/khi cuộn ..."
+3. *(Optional)* **Quick tip on how to try it** — "Thử bấm/Thử nhập/Hover để kiểm tra."
+
+Write everyday Vietnamese as if explaining to your grandmother who never coded.
+
+FORBIDDEN in your reply:
+- Markdown (no **bold**, no lists, no headings, no code blocks, no backticks)
+- Quoted identifiers, file names (/style.css), HTML tag names (<button>), CSS properties (background-color), JS function/variable names (clearAll, btnId)
+- Self-congratulation: "Self-check hoàn tất", "Done", "Completed", "Cập nhật thành công", "Tóm tắt:"
+- More than 3 sentences
+
+GOOD reply:
+"Đã thêm nút Xóa tất cả màu đỏ ở cuối danh sách. Bấm nút sẽ xóa các việc đã hoàn thành. Thử hoàn thành vài việc rồi bấm để kiểm tra."
+
+GOOD reply:
+"Đã đổi giao diện từ tối sang sáng với nền trắng và chữ đen. Mọi nội dung giờ dễ đọc hơn dưới ánh sáng ban ngày."
+
+BAD reply (technical, markdown, multi-paragraph):
+"**Self-check hoàn tất.** Đã thêm \`.clear-all-btn\` vào /index.html. Function \`clearCompleted()\` trong /script.js..."`;
 
 export async function POST(req: NextRequest) {
   try {
@@ -62,8 +94,20 @@ export async function POST(req: NextRequest) {
     try { session = await requireSession(); } catch { return authError(); }
 
     const { currentHtml, newMessage } = await req.json();
-    if (!currentHtml || !newMessage) {
+    if (!currentHtml || !newMessage || typeof currentHtml !== "string" || typeof newMessage !== "string") {
       return new Response(JSON.stringify({ error: "Thiếu dữ liệu" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (newMessage.length > 5000) {
+      return new Response(JSON.stringify({ error: "Nội dung quá dài (tối đa 5000 ký tự)" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (currentHtml.length > 5 * 1024 * 1024) {
+      return new Response(JSON.stringify({ error: "App quá lớn để chỉnh sửa (tối đa 5MB)" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
@@ -78,8 +122,13 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const ip = req.headers.get("x-forwarded-for") || "anonymous";
-    const rl = checkRateLimit(ip);
+    try { assertQuota(session.email); } catch (e) {
+      return new Response(
+        JSON.stringify({ error: e instanceof Error ? e.message : "Hết quota", code: "QUOTA_EXCEEDED" }),
+        { status: 402, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    const rl = checkRateLimit(`user:${session.email}`);
     if (!rl.allowed) {
       return new Response(JSON.stringify({ error: "Quá giới hạn. Thử lại sau." }), {
         status: 429,
@@ -87,8 +136,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const apiKey = process.env.DEEPSEEK_API_KEY;
-    if (!apiKey) {
+    if (!getPrimary() && !getFallback()) {
       return new Response(JSON.stringify({ error: "API key chưa cấu hình" }), {
         status: 500,
         headers: { "Content-Type": "application/json" },
@@ -96,23 +144,16 @@ export async function POST(req: NextRequest) {
     }
 
     const files = parseHtmlToFiles(currentHtml);
+    // Snapshot of original CSS/JS so we can detect what's NEW after edits and
+    // verify every new class/function actually has a matching HTML element.
+    const originalCss = files["/style.css"] || "";
+    const originalJs = files["/script.js"] || "";
     const relevant = extractRelevantFiles(files, newMessage);
     const contextStr = relevant
       .map((f) => `=== ${f.file} ===\n${f.content}`)
       .join("\n\n");
 
-    console.log("\n[EDIT AGENT] ======================");
-    console.log("[EDIT] User request:", newMessage);
-    console.log("[EDIT] Current HTML length:", currentHtml.length);
-    console.log("[EDIT] Relevant files:", relevant.map((f) => f.file).join(", "));
-    console.log("[EDIT] System prompt (last 200 chars):", AGENT_SYSTEM_PROMPT.slice(-200));
-    console.log("[EDIT] Context (first 500 chars):", contextStr.slice(0, 500));
-    console.log("[EDIT] ================================\n");
-
-    const openai = new OpenAI({
-      apiKey,
-      baseURL: "https://api.deepseek.com/v1",
-    });
+    console.log(`[EDIT] start currentHtml=${currentHtml.length}b relevant=${relevant.length}`);
 
     const tools = getToolDefinitions();
 
@@ -130,27 +171,78 @@ export async function POST(req: NextRequest) {
 
     const stream = new ReadableStream({
       async start(controller) {
-        const sendProgress = (msg: string) => {
-          controller.enqueue(encoder.encode(`\x1E${msg}\n`));
+        let closed = false;
+        const safeEnqueue = (data: Uint8Array) => {
+          if (closed) return;
+          try {
+            controller.enqueue(data);
+          } catch {
+            closed = true;
+          }
         };
+        const safeClose = () => {
+          if (closed) return;
+          closed = true;
+          try { controller.close(); } catch { /* already closed */ }
+        };
+        const sendProgress = (msg: string) => safeEnqueue(encoder.encode(`\x1E${msg}\n`));
+        req.signal.addEventListener("abort", () => { closed = true; });
 
-        const maxTurns = 6;
+        // Two-axis cap per request:
+        //  - maxTurns: latency guard (per tier: free=12, pro=16, team=20).
+        //  - tokenBudget: token guard (per tier: free=40k, pro=200k, team=500k).
+        // Either trigger stops the agent; whichever hits first wins. The token
+        // budget matters more for runaway loops (a stuck model can emit many
+        // short turns); maxTurns matters more for wall-clock latency.
+        const maxTurns = maxTurnsFor(session.email);
+        const tokenBudget = perRequestLimit(session.email);
         let turn = 0;
+        // We can fall back to OpenAI on the first turn (clean state), but once
+        // the agent has invoked tools we have to stick with the same provider
+        // — tool-call IDs and conversation state aren't portable across models.
+        let pinnedProvider: AiProvider | null = null;
+        // Allow exactly one auto-recovery turn when we detect orphan CSS/JS
+        // (new classes/functions with no matching HTML element). Capped so we
+        // don't loop forever if the model misinterprets the corrective prompt.
+        let forceFixUsed = false;
 
-        // Track last assistant response for injection detection
-        let lastAssistantContent = "";
-
+        try {
         while (turn < maxTurns) {
+          if (closed) return;
+          if (totalTokens >= tokenBudget) {
+            console.log(`[EDIT] per-request token budget hit (${totalTokens}/${tokenBudget}) — stopping agent`);
+            break;
+          }
           turn++;
 
-          const response = await openai.chat.completions.create({
-            model: process.env.DEEPSEEK_MODEL || "deepseek-chat",
-            messages,
-            tools,
-            tool_choice: "auto",
-            temperature: 0.2,
-            max_tokens: 6000,
-          });
+          const callAi = async (provider: AiProvider) =>
+            provider.client.chat.completions.create({
+              model: provider.model,
+              messages,
+              tools,
+              tool_choice: "auto",
+              temperature: 0.2,
+              // Higher token cap encourages the model to bundle multiple
+              // edit_file calls into a single response (fewer turns spent on
+              // network round-trips), and gives room for reasoning models
+              // (deepseek-v4-pro) whose CoT eats tokens before the visible output.
+              max_tokens: 12000,
+            });
+
+          let response: Awaited<ReturnType<typeof callAi>>;
+          if (pinnedProvider) {
+            response = await callAi(pinnedProvider);
+          } else {
+            // First turn: allow fallback.
+            response = await withFallback(async (provider) => {
+              const r = await callAi(provider);
+              pinnedProvider = provider;
+              return r;
+            }, (reason) => {
+              console.log(`[EDIT] fallback to OpenAI: ${reason}`);
+              sendProgress("progress fallback");
+            });
+          }
 
           const usage = response.usage;
           if (usage?.total_tokens) totalTokens += usage.total_tokens;
@@ -158,22 +250,17 @@ export async function POST(req: NextRequest) {
           const msg = response.choices[0]?.message;
           if (!msg) break;
 
-          // Content safety check on assistant's text response
+          // Content safety check on assistant's text response — narrow regex to avoid false positives
           if (msg.content) {
-            lastAssistantContent = msg.content;
-            // Check if AI is revealing system info
             if (
-              /(system\s*prompt|instructions?|API\s*key|secret|token)/i.test(
+              /(my system prompt|the api key is\s+sk-|here is my secret|reveal(ing)? the prompt)/i.test(
                 msg.content
-              ) &&
-              msg.content.length < 500
+              )
             ) {
-              controller.enqueue(
-                encoder.encode(
-                  "<html><body><h1>Error</h1><p>Response blocked by safety filter.</p></body></html>"
-                )
-              );
-              controller.close();
+              safeEnqueue(encoder.encode(
+                "<html><body><h1>Error</h1><p>Response blocked by safety filter.</p></body></html>"
+              ));
+              safeClose();
               return;
             }
           }
@@ -197,7 +284,7 @@ export async function POST(req: NextRequest) {
               };
               sendProgress(progressMap[fnName] || fnName);
 
-              console.log(`[EDIT] Tool call ${toolCalls + 1}: ${fnName}`, JSON.stringify(args).slice(0, 200));
+              console.log(`[EDIT] tool#${toolCalls} ${fnName}`);
 
               // Safety: block any tool call that tries to access paths outside app
               if (args.file_path && typeof args.file_path === "string") {
@@ -217,7 +304,6 @@ export async function POST(req: NextRequest) {
               }
 
               const result = executeTool(files, fnName, args);
-              console.log(`[EDIT] Tool result (${fnName}):`, result.slice(0, 300));
               messages.push({
                 role: "tool",
                 tool_call_id: tc.id,
@@ -227,113 +313,164 @@ export async function POST(req: NextRequest) {
             continue;
           }
 
-          // Text response from AI — proceed to output
-          // AI self-verifies via tool results + system prompt (opencode-style)
-          const summary = msg.content || "";
+          // Text response from AI — final reply.
+          // BEFORE accepting, do a soft validation: detect new CSS classes or
+          // new JS functions the agent added without wiring up to the HTML.
+          // (Common failure: agent adds a `.dark` rule and `toggleDark()` but
+          // forgets the actual <button>, then claims success.)
+          const finalCss = files["/style.css"] || "";
+          const finalJs = files["/script.js"] || "";
+          const finalHtml = files["/index.html"] || "";
+          const orphans: string[] = [];
 
-          files["/index.html"] = currentHtml;
-          const mergedHtml = mergeFilesToHtml(files);
+          if (forceFixUsed === false) {
+            // Whether the user's request looks like it asked for an interactive
+            // toggle/control. If yes, we apply a stricter check that catches the
+            // case where the model added CSS/JS for a feature but forgot the
+            // visible <button> — even when those CSS/JS pieces were already in
+            // place from a previous turn.
+            const featureReq = /toggle|switch|theme|dark|light|mode|nút|button|chuyển|bật|tắt/i.test(newMessage);
 
-          // === AUTO-VALIDATE: check for missing UI elements ===
-          const scriptJs = files["/script.js"] || "";
-          const htmlContent = files["/index.html"] || "";
-          const missingElements: string[] = [];
+            // Match interactive-looking identifiers (CSS classes + JS funcs).
+            const interactiveRe = /^(toggle|switch|theme|dark|light|mode|btn|button)/i;
 
-          // Check: JS functions without matching HTML elements
-          const funcs = scriptJs.match(/function\s+(\w+)/g) || [];
-          for (const f of funcs) {
-            const name = f.replace("function ", "");
-            if (name === "add" || name === "save" || name === "render" || name === "toggle" || name === "remove" || name === "init") continue;
-            // Check if this function name appears in HTML (onclick, id, class)
-            if (!htmlContent.includes(name)) {
-              missingElements.push(`JS function ${name}() exists but no HTML element references it`);
+            const cssClassRe = /\.([a-zA-Z][a-zA-Z0-9_-]{2,})\s*[{,:]/g;
+            const finalClasses = new Set<string>();
+            for (const m of finalCss.matchAll(cssClassRe)) finalClasses.add(m[1]);
+            const originalClasses = new Set<string>();
+            for (const m of originalCss.matchAll(cssClassRe)) originalClasses.add(m[1]);
+
+            // Always flag NEW classes that aren't used in HTML.
+            for (const c of finalClasses) {
+              if (originalClasses.has(c)) continue;
+              const re = new RegExp(`class\\s*=\\s*["'][^"']*\\b${c}\\b[^"']*["']`);
+              if (!re.test(finalHtml)) orphans.push(`CSS class .${c} có trong style nhưng không có HTML element nào dùng`);
             }
-          }
-
-          // Check: JS getElementById / querySelector references
-          const idRefs = scriptJs.match(/(?:getElementById|querySelector)\s*\(\s*["']([^"']+)["']/g) || [];
-          for (const ref of idRefs) {
-            const m = ref.match(/["']([^"']+)["']/);
-            if (m && !htmlContent.includes(m[1])) {
-              missingElements.push(`JS references #${m[1]} but no element with that id exists in HTML`);
+            // Also flag EXISTING feature-related classes when the user's
+            // request was about a toggle/control.
+            if (featureReq) {
+              for (const c of finalClasses) {
+                if (orphans.some((o) => o.includes(`.${c} `))) continue;
+                if (!interactiveRe.test(c)) continue;
+                const re = new RegExp(`class\\s*=\\s*["'][^"']*\\b${c}\\b[^"']*["']`);
+                if (!re.test(finalHtml)) orphans.push(`CSS class .${c} có style nhưng không HTML element nào dùng (cần thêm vào HTML)`);
+              }
             }
-          }
 
-          // Check: CSS classes without HTML use
-          const cssClasses = (files["/style.css"] || "").match(/\.(-?[_a-zA-Z]+[_a-zA-Z0-9-]*)\s*[{:,]/g) || [];
-          const ignoreClasses = ["btn", "todo", "dark", "body", "html", "input", "li", "ul", "h1", "span"];
-          for (const c of cssClasses) {
-            const name = c.replace(/[.{:,]/g, "");
-            if (ignoreClasses.includes(name)) continue;
-            if (!htmlContent.includes(name)) {
-              // Only check if this class was JUST added (exists in CSS but not in original currentHtml)
-              if (htmlContent !== currentHtml && !currentHtml.includes(name)) {
-                missingElements.push(`CSS class .${name} exists but no HTML element uses it`);
+            const fnRe = /function\s+([a-zA-Z_$][\w$]*)\s*\(/g;
+            const finalFns = new Set<string>();
+            for (const m of finalJs.matchAll(fnRe)) finalFns.add(m[1]);
+            const originalFns = new Set<string>();
+            for (const m of originalJs.matchAll(fnRe)) originalFns.add(m[1]);
+            const ignoreFns = new Set(["init", "render", "save", "load", "update", "main", "start", "escapeHtml", "format"]);
+
+            const checkFn = (fn: string) => {
+              if (ignoreFns.has(fn)) return;
+              if (orphans.some((o) => o.includes(`${fn}()`))) return;
+              const re = new RegExp(`(?:on[a-z]+\\s*=\\s*["'][^"']*\\b${fn}\\s*\\(|addEventListener\\s*\\([^)]*\\b${fn}\\b)`);
+              const calledInJs = new RegExp(`\\b${fn}\\s*\\(`).test(finalJs.replace(new RegExp(`function\\s+${fn}\\s*\\(`), ""));
+              if (!re.test(finalHtml) && !calledInJs) {
+                orphans.push(`Hàm ${fn}() được định nghĩa nhưng không element nào trong HTML gọi nó`);
+              }
+            };
+            // Always check new funcs
+            for (const fn of finalFns) if (!originalFns.has(fn)) checkFn(fn);
+            // Also check existing interactive-looking funcs when feature request
+            if (featureReq) for (const fn of finalFns) if (interactiveRe.test(fn)) checkFn(fn);
+
+            // Detect orphan getElementById('foo') / querySelector('#foo') — JS
+            // referencing an HTML id that doesn't exist. This is the classic
+            // "addEventListener of null" crash that kills the entire script.
+            const idRefRe = /(?:getElementById\s*\(\s*['"]([^'"]+)['"]\s*\)|querySelector\s*\(\s*['"]#([^'" ]+)['"]\s*\))/g;
+            const idsReferenced = new Set<string>();
+            for (const m of finalJs.matchAll(idRefRe)) idsReferenced.add(m[1] || m[2]);
+            for (const id of idsReferenced) {
+              const re = new RegExp(`id\\s*=\\s*["']${id.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}["']`);
+              if (!re.test(finalHtml)) {
+                orphans.push(`JS gọi getElementById('${id}') nhưng HTML không có element nào với id="${id}" — sẽ crash addEventListener`);
               }
             }
           }
 
-          if (missingElements.length > 0) {
-            console.log("[EDIT] Auto-validate found issues:", missingElements);
-            // Add a correction prompt and let AI fix
+          if (orphans.length > 0 && turn < maxTurns) {
+            console.log(`[EDIT] orphan check found ${orphans.length} issues — forcing fix turn`);
+            forceFixUsed = true;
             messages.push(msg);
             messages.push({
               role: "user",
-              content: `AUTO-CHECK FOUND MISSING ELEMENTS:\n${missingElements.map((e) => "- " + e).join("\n")}\n\nFix these now: add the missing HTML elements using edit_file. Then reply "OK".`,
+              content:
+                `Tôi vừa kiểm tra: các thay đổi sau chưa hoàn chỉnh vì thiếu phần tử HTML kết nối với chúng:\n` +
+                orphans.map((o) => `- ${o}`).join("\n") +
+                `\n\nVui lòng dùng edit_file để THÊM các phần tử HTML còn thiếu (nút, input, v.v.) vào /index.html. Đảm bảo mỗi class CSS mới có element gắn class đó, và mỗi function JS mới có element gọi nó (qua onclick hoặc addEventListener). Sau đó reply lại theo format chuẩn.`,
             });
-            continue; // back to tool loop
+            continue;
           }
 
-          // Send the AI's summary so frontend can show it
+          const summary = msg.content || "";
+
+          // Use the agent's edited /index.html as the base. Previously this line
+          // reset to the original currentHtml, which silently discarded every
+          // HTML edit the agent made (so "add a button" looked successful in
+          // the agent log but never appeared in the preview).
+          const mergedHtml = mergeFilesToHtml(files);
+
           sendProgress(`summary ${encodeURIComponent(summary.slice(0, 300))}`);
-          sendProgress(`done ${toolCalls} tools ${totalTokens} tokens`);
 
-          console.log("[EDIT] === DONE ===");
-          console.log("[EDIT] Tool calls:", toolCalls);
-          console.log("[EDIT] Total tokens:", totalTokens);
-          console.log("[EDIT] Output HTML length:", mergedHtml.length);
-          console.log("[EDIT] Output first 300 chars:", mergedHtml.slice(0, 300));
-          console.log("[EDIT] ===========\n");
+          console.log(`[EDIT] done tools=${toolCalls} tokens=${totalTokens} out=${mergedHtml.length}b`);
+          if (totalTokens > 0) recordUsage(session.email, totalTokens);
 
-          // Content safety scan
           const outputViolation = scanGeneratedHtml(mergedHtml);
           if (outputViolation) {
-            controller.enqueue(
-              encoder.encode(
-                "<html><body><h1>Blocked</h1><p>Safety filter: " +
-                  outputViolation.reason +
-                  "</p></body></html>"
-              )
-            );
-            controller.close();
+            safeEnqueue(encoder.encode(
+              "<html><body><h1>Blocked</h1><p>Safety filter: " +
+                outputViolation.reason +
+                "</p></body></html>"
+            ));
+            safeClose();
             return;
           }
 
           sendProgress(`done ${toolCalls} tools ${totalTokens} tokens`);
 
           const htmlBytes = encoder.encode(mergedHtml);
-          const chunkSize = 150;
+          const chunkSize = 2048;
           for (let i = 0; i < htmlBytes.length; i += chunkSize) {
-            controller.enqueue(htmlBytes.slice(i, i + chunkSize));
+            if (closed) return;
+            safeEnqueue(htmlBytes.slice(i, i + chunkSize));
           }
-          controller.close();
+          safeClose();
           return;
         }
 
-        files["/index.html"] = currentHtml;
-        const mergedHtml2 = mergeFilesToHtml(files);
+        // Loop exit without final reply — either we hit maxTurns or burned
+        // through the per-request token budget. Return the ORIGINAL HTML
+        // unchanged: partial edits typically leave JS event handlers wired
+        // to HTML elements that were never added, which throws null-pointer
+        // errors and silently breaks every button in the app.
+        const hitTokenCap = totalTokens >= tokenBudget;
+        const reason = hitTokenCap
+          ? `Yêu cầu vượt ngân sách ${tokenBudget.toLocaleString()} tokens cho một lần chỉnh sửa (đã dùng ${totalTokens.toLocaleString()}). App vẫn giữ như cũ. Hãy tách thành các thay đổi nhỏ hơn.`
+          : "Yêu cầu phức tạp, AI chưa hoàn thành nên app vẫn giữ như cũ. Hãy mô tả cụ thể hơn (ví dụ tách thành nhiều bước nhỏ) rồi thử lại.";
+        sendProgress(`summary ${encodeURIComponent(reason)}`);
+        sendProgress(`done ${toolCalls} tools ${totalTokens} tokens (kept-original)`);
+        if (totalTokens > 0) recordUsage(session.email, totalTokens);
 
-        // Safety scan on fallback output too
-        const outputViolation2 = scanGeneratedHtml(mergedHtml2);
-        if (outputViolation2) {
-          controller.enqueue(encoder.encode("<html><body><h1>Blocked</h1></body></html>"));
-          controller.close();
-          return;
+        const fallbackBytes = encoder.encode(currentHtml);
+        const fallbackChunkSize = 2048;
+        for (let i = 0; i < fallbackBytes.length; i += fallbackChunkSize) {
+          if (closed) return;
+          safeEnqueue(fallbackBytes.slice(i, i + fallbackChunkSize));
         }
-
-        sendProgress(`fallback ${toolCalls} tools ${totalTokens} tokens`);
-        controller.enqueue(encoder.encode(mergedHtml2));
-        controller.close();
+        safeClose();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error("[EDIT] stream error:", msg);
+          const userMsg = /timed?\s*out|ETIMEDOUT|ECONNRESET/i.test(msg)
+            ? "AI phản hồi quá chậm. Thử lại sau ít phút."
+            : "Lỗi chỉnh sửa. Thử lại nhé.";
+          sendProgress(`error ${encodeURIComponent(userMsg)}`);
+          safeClose();
+        }
       },
     });
 
@@ -343,7 +480,7 @@ export async function POST(req: NextRequest) {
         "Cache-Control": "no-cache",
       },
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error("Edit error:", err);
     return new Response(JSON.stringify({ error: "Lỗi máy chủ" }), {
       status: 500,

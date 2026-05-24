@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSession, authError } from "@/lib/auth";
-import { getProjectsByUser, saveProject, deleteProject } from "@/lib/store";
+import { getProjectsByUser, saveProject } from "@/lib/store";
 
 export async function GET() {
   try {

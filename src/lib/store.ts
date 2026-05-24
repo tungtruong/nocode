@@ -1,5 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
+import { getDb } from "@/lib/db";
 
 export interface AppMeta {
   user_email: string;
@@ -8,63 +9,48 @@ export interface AppMeta {
   created_at: string;
 }
 
-type Store = Record<string, AppMeta>;
-
-let _cache: Store | undefined = undefined;
-
-function storePath() {
-  return path.join(process.cwd(), "data", "apps.json");
-}
-
-async function readStore(): Promise<Store> {
-  if (_cache !== undefined) return _cache;
-  try {
-    const raw = await fs.readFile(storePath(), "utf-8");
-    _cache = JSON.parse(raw) as Store;
-  } catch {
-    _cache = {};
-  }
-  return _cache;
-}
-
-async function writeStore(): Promise<void> {
-  if (_cache === undefined) return;
-  await fs.mkdir(path.dirname(storePath()), { recursive: true });
-  await fs.writeFile(storePath(), JSON.stringify(_cache, null, 2), "utf-8");
+// Safe id: only [a-zA-Z0-9_-], length 6-64. Prevents path traversal in deleteApp.
+function isSafeId(id: string): boolean {
+  return typeof id === "string" && /^[a-zA-Z0-9_-]{6,64}$/.test(id);
 }
 
 export async function addApp(id: string, meta: AppMeta): Promise<void> {
-  const s = await readStore();
-  s[id] = meta;
-  await writeStore();
+  if (!isSafeId(id)) throw new Error("Invalid app id");
+  getDb()
+    .prepare("INSERT OR REPLACE INTO apps (id, user_email, title, url, created_at) VALUES (?, ?, ?, ?, ?)")
+    .run(id, meta.user_email, meta.title, meta.url, meta.created_at);
 }
 
 export async function getAppsByUser(email: string): Promise<{ id: string; meta: AppMeta }[]> {
-  const s = await readStore();
-  return Object.entries(s)
-    .filter(([, m]) => m.user_email === email)
-    .map(([id, meta]) => ({ id, meta }))
-    .sort((a, b) => new Date(b.meta.created_at).getTime() - new Date(a.meta.created_at).getTime());
+  const rows = getDb()
+    .prepare("SELECT id, user_email, title, url, created_at FROM apps WHERE user_email = ? ORDER BY created_at DESC")
+    .all(email) as Array<{ id: string; user_email: string; title: string; url: string; created_at: string }>;
+  return rows.map((r) => ({
+    id: r.id,
+    meta: { user_email: r.user_email, title: r.title, url: r.url, created_at: r.created_at },
+  }));
 }
 
 export async function getApp(id: string): Promise<AppMeta | null> {
-  const s = await readStore();
-  return s[id] ?? null;
+  if (!isSafeId(id)) return null;
+  const r = getDb()
+    .prepare("SELECT user_email, title, url, created_at FROM apps WHERE id = ?")
+    .get(id) as { user_email: string; title: string; url: string; created_at: string } | undefined;
+  return r ? { user_email: r.user_email, title: r.title, url: r.url, created_at: r.created_at } : null;
 }
 
 export async function deleteApp(id: string, userEmail: string): Promise<boolean> {
-  const s = await readStore();
-  const meta = s[id];
-  if (!meta || meta.user_email !== userEmail) return false;
-  delete s[id];
-  await writeStore();
+  if (!isSafeId(id)) return false;
+  const result = getDb()
+    .prepare("DELETE FROM apps WHERE id = ? AND user_email = ?")
+    .run(id, userEmail);
+  if (result.changes === 0) return false;
 
   try {
     await fs.rm(path.join(process.cwd(), "public", "apps", id), { recursive: true, force: true });
   } catch {
     // ignore
   }
-
   return true;
 }
 
@@ -85,29 +71,8 @@ export interface ProjectData {
   updated_at: string;
 }
 
-type ProjectStore = Record<string, ProjectData>;
-
-let _projectCache: ProjectStore | undefined = undefined;
-
-function projectStorePath() {
-  return path.join(process.cwd(), "data", "projects.json");
-}
-
-async function readProjectStore(): Promise<ProjectStore> {
-  if (_projectCache !== undefined) return _projectCache;
-  try {
-    const raw = await fs.readFile(projectStorePath(), "utf-8");
-    _projectCache = JSON.parse(raw) as ProjectStore;
-  } catch {
-    _projectCache = {};
-  }
-  return _projectCache;
-}
-
-async function writeProjectStore(): Promise<void> {
-  if (_projectCache === undefined) return;
-  await fs.mkdir(path.dirname(projectStorePath()), { recursive: true });
-  await fs.writeFile(projectStorePath(), JSON.stringify(_projectCache, null, 2), "utf-8");
+function isSafeProjectId(id: string): boolean {
+  return typeof id === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(id);
 }
 
 export async function saveProject(
@@ -115,26 +80,65 @@ export async function saveProject(
   userEmail: string,
   data: Omit<ProjectData, "user_email" | "updated_at">
 ): Promise<void> {
-  const s = await readProjectStore();
-  s[projectId] = { ...data, user_email: userEmail, updated_at: new Date().toISOString() };
-  await writeProjectStore();
+  if (!isSafeProjectId(projectId)) throw new Error("Invalid project id");
+  const updatedAt = new Date().toISOString();
+  getDb()
+    .prepare(
+      "INSERT OR REPLACE INTO projects (id, user_email, app_name, msgs_json, html, url, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    )
+    .run(
+      projectId,
+      userEmail,
+      data.appName,
+      JSON.stringify(data.msgs || []),
+      data.html || "",
+      data.url || "",
+      updatedAt
+    );
 }
 
 export async function getProjectsByUser(
   email: string
 ): Promise<{ id: string; data: ProjectData }[]> {
-  const s = await readProjectStore();
-  return Object.entries(s)
-    .filter(([, d]) => d.user_email === email)
-    .map(([id, data]) => ({ id, data }))
-    .sort((a, b) => new Date(b.data.updated_at).getTime() - new Date(a.data.updated_at).getTime());
+  const rows = getDb()
+    .prepare(
+      "SELECT id, user_email, app_name, msgs_json, html, url, updated_at FROM projects WHERE user_email = ? ORDER BY updated_at DESC"
+    )
+    .all(email) as Array<{
+      id: string;
+      user_email: string;
+      app_name: string;
+      msgs_json: string;
+      html: string;
+      url: string;
+      updated_at: string;
+    }>;
+  return rows.map((r) => ({
+    id: r.id,
+    data: {
+      user_email: r.user_email,
+      appName: r.app_name,
+      msgs: safeParseMsgs(r.msgs_json),
+      html: r.html,
+      url: r.url,
+      updated_at: r.updated_at,
+    },
+  }));
+}
+
+function safeParseMsgs(raw: string): ProjectData["msgs"] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function deleteProject(id: string, userEmail: string): Promise<boolean> {
-  const s = await readProjectStore();
-  if (!s[id] || s[id].user_email !== userEmail) return false;
-  delete s[id];
-  await writeProjectStore();
-  return true;
+  if (!isSafeProjectId(id)) return false;
+  const result = getDb()
+    .prepare("DELETE FROM projects WHERE id = ? AND user_email = ?")
+    .run(id, userEmail);
+  return result.changes > 0;
 }
-

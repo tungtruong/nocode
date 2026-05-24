@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { LangToggle, useLang } from "@/components/LangProvider";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { UsageBadge } from "@/components/UsageBadge";
 
 function cleanHtml(raw: string): string {
   let cleaned = raw;
@@ -14,6 +18,98 @@ function cleanHtml(raw: string): string {
   const end = cleaned.lastIndexOf("</html>");
   if (end > 0) cleaned = cleaned.slice(0, end + 7);
   return cleaned;
+}
+
+// Defence-in-depth alongside the iframe sandbox: the sandbox already gives the
+// iframe an opaque origin (no allow-same-origin), so it can't reach the parent.
+// This CSP meta tag adds a second layer that blocks the *user's* code inside
+// the preview from reaching external services (CDNs, trackers, exfil endpoints).
+// 'unsafe-inline' is required because generated apps inline their <style>/<script>.
+const PREVIEW_CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'">`;
+
+// In a sandboxed iframe (no allow-same-origin), localStorage/sessionStorage/cookie
+// access throws SecurityError on every call. AI-generated apps frequently use
+// these for "remember setting" features; the throw crashes the entire <script>
+// block, which means EVERY event handler in that block silently fails to bind —
+// the user sees the button but clicking does nothing.
+// We install harmless in-memory shims BEFORE the user's code runs.
+const PREVIEW_SHIM = `<script>(function(){
+  try {
+    var make = function(){ var s={}; return {
+      getItem:function(k){ return Object.prototype.hasOwnProperty.call(s,k)?s[k]:null; },
+      setItem:function(k,v){ s[k]=String(v); },
+      removeItem:function(k){ delete s[k]; },
+      clear:function(){ s={}; },
+      key:function(i){ return Object.keys(s)[i]||null; },
+      get length(){ return Object.keys(s).length; }
+    }; };
+    var noop = make();
+    try { window.localStorage.length; } catch(e){
+      Object.defineProperty(window,'localStorage',{value:noop,configurable:true});
+    }
+    try { window.sessionStorage.length; } catch(e){
+      Object.defineProperty(window,'sessionStorage',{value:make(),configurable:true});
+    }
+  } catch(e){}
+  // Surface runtime errors as a small banner so a broken button is visible,
+  // not invisible. Errors from inside the user's <script> still log to the
+  // iframe's DevTools console.
+  window.addEventListener('error', function(ev){
+    var msg = (ev.error && ev.error.message) || ev.message || 'Lỗi không xác định';
+    var bar = document.getElementById('__nocode_err__');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = '__nocode_err__';
+      bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;background:#dc2626;color:#fff;font:12px/1.4 -apple-system,sans-serif;padding:8px 12px;z-index:2147483647;box-shadow:0 -2px 8px rgba(0,0,0,.3);max-height:30vh;overflow:auto;';
+      (document.body || document.documentElement).appendChild(bar);
+    }
+    bar.textContent = '⚠ Lỗi trong preview: ' + msg;
+  });
+})();</script>`;
+
+// Inject a staggered fade-in animation so the user perceives "each piece
+// appearing one by one" when the preview swaps to the final HTML. We only
+// animate the first ~2 levels under <body> so a 50-row todo list doesn't
+// produce a 3-second cascade. Capped at ~1s total wall-clock.
+const PREVIEW_ANIM_STYLE = `<style data-nocode-anim>
+@keyframes __nocode_fadein__ { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+body > *, body > * > * { animation: __nocode_fadein__ .35s ease-out both; }
+</style>`;
+const PREVIEW_ANIM_SCRIPT = `<script>(function(){
+  try {
+    var sel = 'body > *, body > * > *';
+    var els = document.querySelectorAll(sel);
+    var step = els.length > 30 ? 25 : els.length > 15 ? 40 : 60;
+    var max = 1000;
+    for (var i = 0; i < els.length; i++) {
+      els[i].style.animationDelay = Math.min(i * step, max) + 'ms';
+    }
+  } catch (e) {}
+})();</script>`;
+
+// Order matters: CSP meta must come first (so it applies to everything after),
+// then the localStorage shim + error catcher (so they're installed before any
+// user <script> that might call them), then the animation style. Animation
+// script goes at the end of <body>.
+function injectPreviewAnim(html: string): string {
+  if (!html) return html;
+  return injectIntoHead(
+    injectIntoBody(html, PREVIEW_ANIM_SCRIPT),
+    PREVIEW_CSP + PREVIEW_SHIM + PREVIEW_ANIM_STYLE
+  );
+}
+function injectPreviewCspOnly(html: string): string {
+  if (!html) return html;
+  return injectIntoHead(html, PREVIEW_CSP + PREVIEW_SHIM);
+}
+function injectIntoHead(html: string, snippet: string): string {
+  if (/<head[^>]*>/i.test(html)) return html.replace(/<head([^>]*)>/i, `<head$1>${snippet}`);
+  if (/<html[^>]*>/i.test(html)) return html.replace(/<html([^>]*)>/i, `<html$1><head>${snippet}</head>`);
+  return snippet + html;
+}
+function injectIntoBody(html: string, snippet: string): string {
+  if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, `${snippet}</body>`);
+  return html + snippet;
 }
 
 interface Msg { id: string; role: "user" | "assistant"; text: string; html?: string; summary?: string }
@@ -29,6 +125,8 @@ type Phase = "idle" | "new_app" | "thinking" | "streaming" | "done";
 
 export default function BuilderPage() {
   const { t } = useLang();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [appId, setAppId] = useState("");
   const [appName, setAppName] = useState("");
@@ -41,9 +139,14 @@ export default function BuilderPage() {
   const [error, setError] = useState("");
   const [url, setUrl] = useState("");
   const [deploying, setDeploying] = useState(false);
-  const [chars, setChars] = useState(0);
   const [secs, setSecs] = useState(0);
   const [progress, setProgress] = useState("");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Bump to refetch the usage badge after every AI round-trip.
+  const [usageNonce, setUsageNonce] = useState(0);
+  const [quotaExceeded, setQuotaExceeded] = useState<null | { used: number; quota: number; tier: string }>(null);
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
   const [active, setActive] = useState<0 | 1>(0);
   const [mobileTab, setMobileTab] = useState<"chat" | "preview">("chat");
   const activeRef = useRef(0);
@@ -77,17 +180,19 @@ export default function BuilderPage() {
   // Auto-save current project to server
   useEffect(() => {
     if (!appId || !appName) return;
-    const project: SavedProject = { appId, appName, msgs, html, url };
-    setSavedProjects((prev) => {
-      const filtered = prev.filter((p) => p.appId !== appId);
-      return [project, ...filtered];
-    });
     fetch("/api/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ projectId: appId, appName, msgs, html, url }),
     }).catch(() => {});
   }, [appId, appName, msgs, html, url]);
+
+  // Sidebar list = server-fetched projects with current project merged in (no setState in effect)
+  const allProjects = useMemo<SavedProject[]>(() => {
+    if (!appId || !appName) return savedProjects;
+    const current: SavedProject = { appId, appName, msgs, html, url };
+    return [current, ...savedProjects.filter((p) => p.appId !== appId)];
+  }, [savedProjects, appId, appName, msgs, html, url]);
 
   // Open existing project
   const openProject = useCallback((p: SavedProject) => {
@@ -129,41 +234,52 @@ export default function BuilderPage() {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Deploy thất bại");
       setUrl(d.url);
-    } catch (e: any) {
-      setError(e.message || "Lỗi deploy");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Lỗi deploy");
     } finally {
       setDeploying(false);
     }
   }, [appName]);
 
-  const send = useCallback(async () => {
-    const text = input.trim();
+  const send = useCallback(async (overrideText?: string) => {
+    const text = (overrideText ?? input).trim();
     if (!text) return;
     abort.current?.abort();
     const c = new AbortController();
     abort.current = c;
-    setInput(""); setError(""); setChars(0); setSecs(0); setProgress("");
+    if (overrideText === undefined) setInput("");
+    setError(""); setSecs(0); setProgress("");
     setMobileTab("preview");
 
     const um: Msg = { id: Date.now().toString(), role: "user", text };
-    const all = [...msgs, um];
+    const aid = (Date.now() + 1).toString();
+    aidRef.current = aid;
+    // Add user msg + empty assistant placeholder atomically so the chat shows
+    // a single AI bubble (whose body fills in as progress arrives) instead of a
+    // gap until the first HTML chunk.
+    const all = [...msgs, um, { id: aid, role: "assistant" as const, text: "", html: "" }];
     setMsgs(all);
     setPhase("thinking");
     t0.current = Date.now();
     timer.current = setInterval(() => setSecs(Math.floor((Date.now() - t0.current) / 1000)), 200);
 
-    const aid = (Date.now() + 1).toString();
-    aidRef.current = aid;
-    let assistantAdded = false;
-
+    // Stage iframe target (the inactive one — we swap to it when streaming completes).
+    // We can't write to iframe.contentDocument because the sandbox iframe lives in an
+    // opaque origin (no allow-same-origin, by design). Instead we set `srcdoc`,
+    // throttled to avoid thrashing the iframe on every chunk.
     const si = activeRef.current === 0 ? 1 : 0;
     const sf = si === 0 ? frameA : frameB;
-    const sif = sf.current;
-    let doc: Document | null = null;
-    if (sif) {
-      doc = sif.contentDocument || sif.contentWindow?.document || null;
-      if (doc) doc.open();
-    }
+    let lastPreviewAt = 0;
+    const updatePreview = (htmlStr: string, force = false) => {
+      const now = Date.now();
+      if (!force && now - lastPreviewAt < 250) return;
+      lastPreviewAt = now;
+      const node = sf.current;
+      // CSP applies on every render (always). Animation only on FINAL render
+      // (force=true) — mid-stream srcdoc swaps would re-trigger the animation
+      // every 250ms and look like a strobe.
+      if (node) node.srcdoc = force ? injectPreviewAnim(htmlStr) : injectPreviewCspOnly(htmlStr);
+    };
 
     try {
       const isFirst = !html;
@@ -172,7 +288,20 @@ export default function BuilderPage() {
         ? JSON.stringify({ messages: all.slice(0, -1), currentHtml: html, newMessage: text })
         : JSON.stringify({ currentHtml: html, newMessage: text });
       const r = await fetch(ep, { method: "POST", headers: { "Content-Type": "application/json" }, body: bd, signal: c.signal });
-      if (!r.ok) { const d = await r.json().catch(() => null); throw new Error(d?.error || "Sinh thất bại"); }
+      if (!r.ok) {
+        const d = await r.json().catch(() => null);
+        // Quota exceeded — show the dedicated modal and bail out cleanly.
+        if (r.status === 402 || d?.code === "QUOTA_EXCEEDED") {
+          fetch("/api/usage").then((res) => res.ok ? res.json() : null).then((u) => {
+            if (u) setQuotaExceeded({ used: u.used, quota: u.quota, tier: u.tier });
+            else setQuotaExceeded({ used: 0, quota: 0, tier: "free" });
+          }).catch(() => setQuotaExceeded({ used: 0, quota: 0, tier: "free" }));
+          setMsgs((p) => p.filter((m) => m.id !== aid));
+          setPhase("idle");
+          return;
+        }
+        throw new Error(d?.error || "Sinh thất bại");
+      }
 
       const reader = r.body?.getReader();
       if (!reader) throw new Error("Không có nội dung trả về");
@@ -187,95 +316,275 @@ export default function BuilderPage() {
         for (let i = 0; i < parts.length; i++) {
           if (i > 0) {
             const pl = parts[i].split("\n")[0];
-            if (pl.startsWith("done ")) setProgress(pl.slice(5));
-            else if (pl.startsWith("summary ")) {
+            if (pl.startsWith("done ")) {
+              setProgress(pl.slice(5));
+            } else if (pl.startsWith("summary ")) {
               try {
                 const st = decodeURIComponent(pl.slice(8));
                 setMsgs((p) => p.map((m) => (m.id === aid ? { ...m, summary: st } : m)));
               } catch {}
-            } else if (pl) setProgress(pl);
+            } else if (pl === "reset") {
+              // Server told us its previous output was wrong; drop everything
+              // we accumulated so the next chunks replace it cleanly.
+              acc = "";
+              const node = sf.current;
+              if (node) node.srcdoc = "";
+            } else if (pl.startsWith("error ")) {
+              // Server-side failure (e.g. DeepSeek timeout). Surface the message
+              // and drop the placeholder assistant bubble so the chat doesn't
+              // look stuck on "Đang sinh HTML...".
+              try {
+                const errMsg = decodeURIComponent(pl.slice(6));
+                setError(errMsg);
+              } catch {
+                setError("Lỗi không xác định");
+              }
+              setMsgs((p) => p.filter((m) => m.id !== aid));
+              setPhase("idle");
+              // Drain the rest of the response and bail out.
+              try { reader.cancel(); } catch {}
+              return;
+            } else if (pl.startsWith("progress ")) {
+              const stepKey = pl.slice(9).trim();
+              const label =
+                stepKey === "thinking" ? t.buildThinking :
+                stepKey === "generating" ? t.buildGenerating :
+                stepKey === "verifying" ? t.buildVerifying :
+                stepKey === "correcting" ? t.buildCorrecting :
+                stepKey === "summarizing" ? t.buildSummarizing :
+                stepKey === "fallback" ? t.buildFallback :
+                stepKey === "done" ? t.buildDone : stepKey;
+              setProgress(label);
+            } else if (pl) {
+              setProgress(pl);
+            }
             parts[i] = parts[i].slice(parts[i].indexOf("\n") + 1);
           }
         }
         chunk = parts.join("");
         if (!chunk.trim()) continue;
         acc += chunk;
-        if (doc) doc.write(chunk);
         const c2 = cleanHtml(acc);
-        setChars(acc.length);
         setHtml(c2);
-        if (!assistantAdded) {
-          assistantAdded = true;
-          setMsgs((p) => [...p, { id: aid, role: "assistant", text: c2, html: c2 }]);
-        } else {
-          setMsgs((p) => p.map((m) => (m.id === aid ? { ...m, text: c2, html: c2 } : m)));
-        }
+        updatePreview(c2);
+        setMsgs((p) => p.map((m) => (m.id === aid ? { ...m, text: c2, html: c2 } : m)));
         if (phase === "thinking") setPhase("streaming");
       }
       acc += dec.decode();
-      if (doc) doc.close();
       const fin = cleanHtml(acc);
+      updatePreview(fin, true);
       setHtml(fin);
       setActive(si as 0 | 1);
-      setMsgs((p) => {
-        const exists = p.some((m) => m.id === aid);
-        if (!exists) return [...p, { id: aid, role: "assistant", text: fin, html: fin }];
-        return p.map((m) => (m.id === aid ? { ...m, text: fin, html: fin } : m));
-      });
+      setMsgs((p) => p.map((m) => (m.id === aid ? { ...m, text: fin, html: fin } : m)));
       setPhase("done");
-    } catch (e: any) {
-      if (doc) doc.close();
-      if (e.name !== "AbortError") { setError(e.message); setPhase("idle"); } else setPhase("idle");
+    } catch (e) {
+      if (e instanceof Error && e.name !== "AbortError") {
+        setError(e.message);
+      }
+      setPhase("idle");
     } finally {
       if (timer.current) clearInterval(timer.current);
       abort.current = null;
+      // Re-pull usage now that the round-trip has completed (success or fail).
+      setUsageNonce((n) => n + 1);
     }
-  }, [input, msgs, html, deploy, active, phase]);
+  }, [input, msgs, html, phase, t]);
 
+  // Memoize the animated version so reopening a project or toggling
+  // between iframes doesn't re-inject every render.
+  const animatedHtml = useMemo(() => (html ? injectPreviewAnim(html) : ""), [html]);
+
+  // Manual reload: blank both iframes then re-set srcdoc so the user's in-memory
+  // state (counters, form input, theme toggle) starts from scratch — useful
+  // when testing flows or after the user code crashes mid-interaction.
+  const refreshPreview = useCallback(() => {
+    if (!animatedHtml) return;
+    [frameA.current, frameB.current].forEach((f) => {
+      if (!f) return;
+      f.srcdoc = "";
+      // Schedule the real srcdoc on the next frame so the browser actually
+      // tears down the old document — setting the same string in one tick is
+      // a no-op.
+      requestAnimationFrame(() => { f.srcdoc = animatedHtml; });
+    });
+  }, [animatedHtml]);
   useEffect(() => {
     if (phase !== "done" && phase !== "idle") return;
-    if (!html) return;
-    [frameA.current, frameB.current].forEach((f) => { if (f && f.srcdoc !== html) f.srcdoc = html; });
-  }, [phase, html]);
+    if (!animatedHtml) return;
+    [frameA.current, frameB.current].forEach((f) => { if (f && f.srcdoc !== animatedHtml) f.srcdoc = animatedHtml; });
+  }, [phase, animatedHtml]);
 
   const cancel = useCallback(() => { abort.current?.abort(); if (timer.current) clearInterval(timer.current); setPhase("idle"); }, []);
-  const handleLogout = async () => { await fetch("/api/auth/logout", { method: "POST" }); window.location.href = "/login"; };
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
+    router.refresh();
+  };
   const busy = phase === "thinking" || phase === "streaming";
-  const pct = useMemo(() => chars === 0 ? 0 : Math.min(95, Math.round((chars / 10000) * 100)), [chars]);
+
+  const copyText = useCallback((id: string, text: string) => {
+    navigator.clipboard.writeText(text).catch(() => {});
+    setCopiedId(id);
+    setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 1500);
+  }, []);
+
+  const regenerate = useCallback((assistantMsgId: string) => {
+    if (busy) return;
+    const idx = msgs.findIndex((m) => m.id === assistantMsgId);
+    if (idx <= 0) return;
+    const userMsg = msgs[idx - 1];
+    if (userMsg.role !== "user") return;
+    setMsgs((prev) => prev.slice(0, idx - 1));
+    send(userMsg.text);
+  }, [msgs, busy, send]);
+
+  const startEdit = useCallback((msgId: string, currentText: string) => {
+    setEditingMsgId(msgId);
+    setEditingText(currentText);
+  }, []);
+
+  const confirmEdit = useCallback(() => {
+    const newText = editingText.trim();
+    if (!newText || !editingMsgId || busy) {
+      setEditingMsgId(null);
+      return;
+    }
+    const idx = msgs.findIndex((m) => m.id === editingMsgId);
+    if (idx < 0) {
+      setEditingMsgId(null);
+      return;
+    }
+    setMsgs((prev) => prev.slice(0, idx));
+    setEditingMsgId(null);
+    send(newText);
+  }, [editingText, editingMsgId, msgs, busy, send]);
+
+  const cancelEdit = useCallback(() => {
+    setEditingMsgId(null);
+    setEditingText("");
+  }, []);
+
+  const [confirmReset, setConfirmReset] = useState(false);
+  const doReset = useCallback(() => {
+    abort.current?.abort();
+    setAppId(""); setAppName(""); setMsgs([]); setHtml(""); setUrl(""); setPhase("idle"); setProgress("");
+    setConfirmReset(false);
+  }, []);
+  const resetProject = useCallback(() => {
+    if (busy) {
+      setConfirmReset(true);
+      return;
+    }
+    doReset();
+  }, [busy, doReset]);
+
+  // Delete project from sidebar
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+  const deletingProjectName = useMemo(
+    () => allProjects.find((p) => p.appId === deletingProjectId)?.appName ?? "",
+    [allProjects, deletingProjectId]
+  );
+  const confirmDeleteProject = useCallback(async () => {
+    const id = deletingProjectId;
+    setDeletingProjectId(null);
+    if (!id) return;
+    try {
+      await fetch(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" });
+    } catch { /* ignore — still drop locally */ }
+    setSavedProjects((prev) => prev.filter((p) => p.appId !== id));
+    // If we just deleted the project that's currently open, drop back to the
+    // "new project" screen.
+    if (appId === id) {
+      abort.current?.abort();
+      setAppId(""); setAppName(""); setMsgs([]); setHtml(""); setUrl(""); setPhase("idle"); setProgress("");
+    }
+  }, [deletingProjectId, appId]);
+
+  // Load project from ?project=<id> URL param on first mount
+  const projectIdFromUrl = searchParams.get("project");
+  const urlLoadedRef = useRef(false);
+  useEffect(() => {
+    if (urlLoadedRef.current || !projectIdFromUrl || appId) return;
+    const found = savedProjects.find((p) => p.appId === projectIdFromUrl);
+    if (!found) return;
+    urlLoadedRef.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    openProject(found);
+  }, [projectIdFromUrl, savedProjects, appId, openProject]);
 
   // Show "New App" or "Open Project" screen when no project loaded
   if (!appId) {
     return (
       <div className="flex h-screen flex-col bg-[#fcfcfd] overflow-hidden">
         <header className="flex items-center justify-between border-b border-[#e2e8f0] bg-white px-4 sm:px-6 py-3 shrink-0">
-          <a href="/" className="flex items-center gap-2.5">
+          <Link href="/" className="flex items-center gap-2.5">
             <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-[#7c3aed] to-[#a855f7] shadow-sm shadow-[#7c3aed]/20">
               <svg className="h-4 w-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
               </svg>
             </div>
             <span className="text-base font-bold tracking-tight text-[#0f172a]">nocode</span>
-          </a>
+          </Link>
           <div className="flex items-center gap-2">
+            <UsageBadge refreshKey={usageNonce} />
             <LangToggle />
-            <a href="/dashboard" className="text-xs text-[#94a3b8] hover:text-[#64748b] transition-colors">{t.myApps}</a>
-            <button onClick={handleLogout} className="rounded-lg px-2.5 py-1.5 text-xs text-[#94a3b8] hover:text-[#64748b] hover:bg-[#f1f5f9] transition-all">{t.signout}</button>
+            <button onClick={handleLogout} className="rounded-lg px-2.5 py-1.5 text-xs text-[#64748b] hover:text-[#64748b] hover:bg-[#f1f5f9] transition-all">{t.signout}</button>
           </div>
         </header>
 
-        <div className="flex flex-1 overflow-hidden">
-          {/* Sidebar: existing projects */}
+        <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
+          {/* Sidebar: existing projects. On desktop a fixed column; on mobile a collapsible <details>. */}
+          <details className="md:hidden border-b border-[#e2e8f0] bg-white" open={allProjects.length > 0 && allProjects.length <= 3}>
+            <summary className="cursor-pointer list-none px-4 py-3 text-xs font-semibold text-[#7c3aed] uppercase tracking-wider flex items-center justify-between">
+              <span>{t.buildYourProjects} ({allProjects.length})</span>
+              <span aria-hidden="true">▾</span>
+            </summary>
+            <div className="px-4 pb-4 space-y-2 max-h-[40vh] overflow-y-auto">
+              {allProjects.length === 0 ? (
+                <p className="text-xs text-[#cbd5e1]">{t.buildNoProjects}</p>
+              ) : (
+                allProjects.map((p) => (
+                  <div key={p.appId} className="group relative rounded-xl border border-[#e2e8f0] bg-white hover:border-[#7c3aed]/30 hover:bg-[#7c3aed]/[0.02] active:bg-[#7c3aed]/5 transition-all">
+                    <button type="button" onClick={() => openProject(p)} className="w-full text-left px-3 py-2.5 pr-10 block">
+                      <span className="block text-sm font-medium text-[#18181b] truncate">{p.appName}</span>
+                      <span className="block text-[10px] text-[#a1a1aa] mt-0.5">{p.msgs.filter((m) => m.role === "user").length} {t.buildMsgs}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setDeletingProjectId(p.appId); }}
+                      aria-label={`${t.dashDelete} ${p.appName}`}
+                      title={t.dashDelete}
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 z-10 flex h-7 w-7 items-center justify-center rounded-lg text-[#94a3b8] hover:bg-red-50 hover:text-red-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/30 transition-colors"
+                    >
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </details>
+
           <div className="w-64 border-r border-[#e2e8f0] bg-white p-4 space-y-3 overflow-y-auto hidden md:block">
-            <h3 className="text-xs font-semibold text-[#94a3b8] uppercase tracking-wider">{t.buildYourProjects}</h3>
-            {savedProjects.length === 0 ? (
+            <h3 className="text-xs font-semibold text-[#64748b] uppercase tracking-wider">{t.buildYourProjects}</h3>
+            {allProjects.length === 0 ? (
               <p className="text-xs text-[#cbd5e1]">{t.buildNoProjects}</p>
             ) : (
-              savedProjects.map((p) => (
-                <button key={p.appId} onClick={() => openProject(p)}
-                  className="w-full text-left rounded-xl border border-[#e2e8f0] bg-white px-3 py-2.5 hover:border-[#7c3aed]/30 hover:bg-[#7c3aed]/[0.02] transition-all">
-                  <p className="text-sm font-medium text-[#18181b] truncate">{p.appName}</p>
-                  <p className="text-[10px] text-[#a1a1aa] mt-0.5">{p.msgs.filter((m) => m.role === "user").length} {t.buildMsgs}</p>
-                </button>
+              allProjects.map((p) => (
+                <div key={p.appId} className="group relative rounded-xl border border-[#e2e8f0] bg-white hover:border-[#7c3aed]/30 hover:bg-[#7c3aed]/[0.02] transition-all">
+                  <button type="button" onClick={() => openProject(p)} className="w-full text-left px-3 py-2.5 pr-10 block">
+                    <span className="block text-sm font-medium text-[#18181b] truncate">{p.appName}</span>
+                    <span className="block text-[10px] text-[#a1a1aa] mt-0.5">{p.msgs.filter((m) => m.role === "user").length} {t.buildMsgs}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setDeletingProjectId(p.appId); }}
+                    aria-label={`${t.dashDelete} ${p.appName}`}
+                    title={t.dashDelete}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 z-10 flex h-7 w-7 items-center justify-center rounded-lg text-[#94a3b8] opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-red-50 hover:text-red-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/30 transition-all"
+                  >
+                    <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+                  </button>
+                </div>
               ))
             )}
           </div>
@@ -289,7 +598,7 @@ export default function BuilderPage() {
                 </svg>
               </div>
               <h2 className="text-xl font-bold text-[#0f172a] mb-2">{t.buildNewApp}</h2>
-              <p className="text-sm text-[#94a3b8] mb-6">{t.buildNewAppDesc}</p>
+              <p className="text-sm text-[#64748b] mb-6">{t.buildNewAppDesc}</p>
               <input
                 type="text"
                 value={newAppName}
@@ -305,6 +614,29 @@ export default function BuilderPage() {
             </div>
           </div>
         </div>
+        <ConfirmDialog
+          open={deletingProjectId !== null}
+          title={t.buildDeleteProjectTitle}
+          message={t.buildDeleteProjectConfirm.replace("{name}", deletingProjectName)}
+          confirmLabel={t.dashDelete}
+          destructive
+          onConfirm={confirmDeleteProject}
+          onCancel={() => setDeletingProjectId(null)}
+        />
+        {quotaExceeded && (
+          <ConfirmDialog
+            open
+            title={t.quotaExceededTitle}
+            message={t.quotaExceededDesc
+              .replace("{used}", quotaExceeded.used.toLocaleString())
+              .replace("{quota}", quotaExceeded.quota.toLocaleString())
+              .replace("{tier}", quotaExceeded.tier)}
+            confirmLabel={t.quotaUpgrade}
+            cancelLabel={t.dialogCancel}
+            onConfirm={() => { setQuotaExceeded(null); router.push("/pricing"); }}
+            onCancel={() => setQuotaExceeded(null)}
+          />
+        )}
       </div>
     );
   }
@@ -314,20 +646,21 @@ export default function BuilderPage() {
     <div className="flex h-screen flex-col bg-[#fcfcfd] overflow-hidden">
       <header className="flex items-center justify-between border-b border-[#e2e8f0] bg-white px-4 sm:px-6 py-3 shrink-0">
         <div className="flex items-center gap-3 min-w-0">
-          <a href="/" className="shrink-0 flex items-center gap-2.5">
+          <Link href="/" className="shrink-0 flex items-center gap-2.5">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-[#7c3aed] to-[#a855f7] shadow-sm shadow-[#7c3aed]/20">
               <svg className="h-3 w-3 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
               </svg>
             </div>
-          </a>
-          <button onClick={() => { setAppId(""); setAppName(""); setMsgs([]); setHtml(""); setUrl(""); setPhase("idle"); }}
-            className="text-xs text-[#94a3b8] hover:text-[#7c3aed] transition-colors ml-2" title={t.otherProjects}>
+          </Link>
+          <button onClick={resetProject}
+            className="text-xs text-[#64748b] hover:text-[#7c3aed] transition-colors ml-2" title={t.otherProjects}>
             ← {t.otherProjects}
           </button>
           <span className="text-sm font-semibold text-[#18181b] truncate">{appName}</span>
         </div>
         <div className="flex items-center gap-2">
+          <UsageBadge refreshKey={usageNonce} />
           <LangToggle />
           {html && !deploying && (
             <button onClick={() => deploy(html)}
@@ -341,30 +674,43 @@ export default function BuilderPage() {
               {t.openApp} &rarr;
             </a>
           )}
-          <a href="/dashboard" className="text-xs text-[#94a3b8] hover:text-[#64748b] transition-colors">{t.myApps}</a>
-          <button onClick={handleLogout} className="rounded-lg px-2.5 py-1.5 text-xs text-[#94a3b8] hover:text-[#64748b] hover:bg-[#f1f5f9] transition-all">{t.signout}</button>
+          <Link href="/dashboard" className="text-xs text-[#64748b] hover:text-[#64748b] transition-colors">{t.myApps}</Link>
+          <button onClick={handleLogout} className="rounded-lg px-2.5 py-1.5 text-xs text-[#64748b] hover:text-[#64748b] hover:bg-[#f1f5f9] transition-all">{t.signout}</button>
         </div>
       </header>
 
       {/* Mobile tabs */}
       <div className="flex md:hidden border-b border-[#e2e8f0] bg-white shrink-0">
-        {(["Chat", "Xem trước"] as const).map((tab) => (
-          <button key={tab} onClick={() => setMobileTab(tab === "Chat" ? "chat" : "preview")}
-            className={`flex-1 py-3 text-xs font-semibold text-center transition-all relative ${
-              (tab === "Chat" && mobileTab === "chat") || (tab === "Xem trước" && mobileTab === "preview") ? "text-[#7c3aed]" : "text-[#94a3b8] hover:text-[#64748b]"
-            }`}>
-            {tab}
-            {((tab === "Chat" && mobileTab === "chat") || (tab === "Xem trước" && mobileTab === "preview")) && <span className="absolute bottom-0 left-1/4 right-1/4 h-0.5 rounded-full bg-[#7c3aed]" />}
-            {tab === "Xem trước" && busy && <span className="absolute top-1.5 right-1/4 h-1.5 w-1.5 rounded-full bg-[#7c3aed] animate-pulse" />}
-          </button>
-        ))}
+        {([
+          { id: "chat" as const, label: t.buildMobileChat },
+          { id: "preview" as const, label: t.buildMobilePreview },
+        ]).map(({ id, label }) => {
+          const isActive = mobileTab === id;
+          return (
+            <button key={id} onClick={() => setMobileTab(id)}
+              aria-label={label}
+              aria-pressed={isActive}
+              className={`flex-1 py-3 text-xs font-semibold text-center transition-all relative ${
+                isActive ? "text-[#7c3aed]" : "text-[#64748b] hover:text-[#334155]"
+              }`}>
+              {label}
+              {isActive && <span className="absolute bottom-0 left-1/4 right-1/4 h-0.5 rounded-full bg-[#7c3aed]" />}
+              {id === "preview" && busy && <span className="absolute top-1.5 right-1/4 h-1.5 w-1.5 rounded-full bg-[#7c3aed] animate-pulse" />}
+            </button>
+          );
+        })}
       </div>
 
       <div className="flex flex-1 min-h-0">
         <div className={`${mobileTab === "preview" ? "hidden" : "flex"} md:flex w-full flex-col md:w-[384px] lg:w-[440px] xl:w-[480px] bg-white border-r border-[#e2e8f0]`}>
           <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 space-y-5">
-            {msgs.map((m) => (
-              <div key={m.id} className={`flex gap-3 ${m.role === "user" ? "flex-row-reverse" : ""}`}>
+            {msgs.map((m) => {
+              const isLast = m.id === msgs[msgs.length - 1]?.id;
+              const isStreaming = phase === "streaming" && isLast;
+              const isEditing = editingMsgId === m.id;
+              const summary = m.role === "assistant" ? (m.summary || t.buildDone) : "";
+              return (
+              <div key={m.id} className={`group flex gap-3 ${m.role === "user" ? "flex-row-reverse" : ""}`}>
                 <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
                   m.role === "user"
                     ? "bg-gradient-to-br from-[#7c3aed] to-[#a855f7] text-white shadow-sm shadow-[#7c3aed]/20"
@@ -378,43 +724,80 @@ export default function BuilderPage() {
                       ? "rounded-tr-md bg-gradient-to-br from-[#7c3aed] to-[#8b5cf6] text-white shadow-sm shadow-[#7c3aed]/15"
                       : "rounded-tl-md bg-[#f8fafc] text-[#334155] ring-1 ring-[#e2e8f0]"
                   }`}>
-                    {m.role === "user" ? m.text : m.html ? (
-                      <div>
-                        {phase === "streaming" && m.id === msgs[msgs.length - 1]?.id ? (
-                          <div className="flex items-center gap-2 text-xs">
-                            <span className="flex h-2 w-2 rounded-full bg-[#7c3aed] animate-pulse" />
-                            <span className="text-[#94a3b8] font-medium">{t.buildBuilding}</span>
-                          </div>
-                        ) : (
-                          <p className="text-xs text-[#334155] leading-relaxed font-medium">{m.summary || t.buildDone}</p>
-                        )}
+                    {m.role === "user" ? (
+                      isEditing ? (
+                        <textarea
+                          value={editingText}
+                          onChange={(e) => setEditingText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); confirmEdit(); }
+                            else if (e.key === "Escape") cancelEdit();
+                          }}
+                          rows={2}
+                          autoFocus
+                          className="w-full min-w-[200px] resize-none bg-transparent text-white placeholder-white/60 focus:outline-none"
+                        />
+                      ) : m.text
+                    ) : (isLast && busy) ? (
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="flex h-2 w-2 rounded-full bg-[#7c3aed] animate-pulse" />
+                        <span className="text-[#64748b] font-medium truncate">
+                          {progress || (phase === "thinking" ? t.buildThinking : t.buildBuilding)}
+                        </span>
+                        <span className="text-[10px] text-[#a1a1aa] tabular-nums ml-1">{secs}s</span>
                       </div>
-                    ) : <span className="text-xs text-[#94a3b8] font-medium">{t.buildWait}</span>}
+                    ) : (
+                      <p className="text-xs text-[#334155] leading-relaxed whitespace-pre-line">{summary}</p>
+                    )}
                   </div>
+                  {!isStreaming && !isEditing && (
+                    <div className={`flex items-center gap-1 opacity-60 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100 transition-opacity ${m.role === "user" ? "flex-row-reverse" : ""}`}>
+                      <button
+                        onClick={() => copyText(m.id, m.role === "user" ? m.text : summary)}
+                        aria-label={copiedId === m.id ? t.msgCopied : t.msgCopy}
+                        className="text-[10px] text-[#64748b] hover:text-[#7c3aed] focus:text-[#7c3aed] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7c3aed]/30 px-1.5 py-0.5 rounded transition-colors"
+                        title={t.msgCopy}
+                      >
+                        {copiedId === m.id ? t.msgCopied : t.msgCopy}
+                      </button>
+                      {m.role === "user" && !busy && (
+                        <button
+                          onClick={() => startEdit(m.id, m.text)}
+                          aria-label={t.msgEdit}
+                          className="text-[10px] text-[#64748b] hover:text-[#7c3aed] focus:text-[#7c3aed] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7c3aed]/30 px-1.5 py-0.5 rounded transition-colors"
+                          title={t.msgEdit}
+                        >
+                          {t.msgEdit}
+                        </button>
+                      )}
+                      {m.role === "assistant" && m.html && !busy && (
+                        <button
+                          onClick={() => regenerate(m.id)}
+                          aria-label={t.msgRegenerate}
+                          className="text-[10px] text-[#64748b] hover:text-[#7c3aed] focus:text-[#7c3aed] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7c3aed]/30 px-1.5 py-0.5 rounded transition-colors"
+                          title={t.msgRegenerate}
+                        >
+                          {t.msgRegenerate}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {isEditing && (
+                    <div className="flex gap-2 mt-1">
+                      <button onClick={confirmEdit} className="text-[10px] font-medium text-[#7c3aed] hover:text-[#6d28d9] px-2 py-1 rounded">
+                        {t.msgEdit} ↵
+                      </button>
+                      <button onClick={cancelEdit} className="text-[10px] text-[#64748b] hover:text-[#64748b] px-2 py-1 rounded">
+                        ✕
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
-            ))}
+              );
+            })}
 
             <div ref={bot} />
-            {(phase === "thinking" || phase === "streaming") && (
-              <div className="flex gap-3">
-                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#f1f5f9] text-[#7c3aed] ring-1 ring-[#e2e8f0] text-xs font-bold">AI</div>
-                <div className="rounded-2xl rounded-tl-md bg-[#f8fafc] ring-1 ring-[#e2e8f0] px-4 py-3 min-w-[200px] space-y-1.5">
-                  <div className="flex items-center gap-3">
-                    <span className="flex items-center gap-2">
-                      <span className="flex h-2 w-2 rounded-full bg-[#7c3aed] animate-pulse" />
-                      <span className="text-xs text-[#64748b] font-medium truncate">
-                        {progress || (phase === "thinking" ? t.buildThinking : t.buildBuilding)}
-                      </span>
-                    </span>
-                    <span className="text-[10px] text-[#a1a1aa] tabular-nums ml-auto">{secs}s{chars > 0 ? ` · ${chars.toLocaleString()}c` : ""}</span>
-                  </div>
-                  <div className="h-1 w-full bg-[#e2e8f0] rounded-full overflow-hidden">
-                    <div className="h-full bg-[#7c3aed] transition-all duration-300 rounded-full" style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
 
           <div className="px-3 sm:px-4 pb-3 sm:pb-4 bg-white shrink-0">
@@ -432,13 +815,13 @@ export default function BuilderPage() {
                 className="flex-1 resize-none bg-transparent text-sm leading-relaxed text-[#0f172a] placeholder:text-[#cbd5e1] focus:outline-none disabled:opacity-40 py-0.5"
               />
               {busy ? (
-                <button onClick={cancel} className="shrink-0 flex items-center justify-center rounded-xl border border-[#e2e8f0] bg-white w-9 h-9 text-[#94a3b8] hover:text-[#64748b] hover:bg-[#f1f5f9] transition-all">
-                  <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2" /></svg>
+                <button onClick={cancel} aria-label={t.msgStop} title={t.msgStop} className="shrink-0 flex items-center justify-center rounded-xl border border-[#e2e8f0] bg-white w-9 h-9 text-[#64748b] hover:text-[#334155] hover:bg-[#f1f5f9] transition-all">
+                  <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="2" /></svg>
                 </button>
               ) : (
-                <button onClick={send} disabled={!input.trim()}
+                <button onClick={() => send()} disabled={!input.trim()} aria-label={t.msgSend} title={t.msgSend}
                   className="shrink-0 flex items-center justify-center rounded-xl bg-[#7c3aed] w-9 h-9 text-white hover:bg-[#6d28d9] disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-sm shadow-[#7c3aed]/20">
-                  <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 8h12M10 4l4 4-4 4" /></svg>
+                  <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2 8h12M10 4l4 4-4 4" /></svg>
                 </button>
               )}
             </div>
@@ -450,29 +833,75 @@ export default function BuilderPage() {
           <div className="hidden md:flex items-center justify-between border-b border-[#e2e8f0] bg-white px-5 py-3">
             <div className="flex items-center gap-2.5">
               <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${busy ? "bg-[#7c3aed] animate-pulse" : html ? "bg-emerald-400" : "bg-[#e2e8f0]"}`} />
-              <span className="text-xs font-semibold text-[#94a3b8] uppercase tracking-wider">{t.buildPreview}</span>
+              <span className="text-xs font-semibold text-[#64748b] uppercase tracking-wider">{t.buildPreview}</span>
             </div>
+            {html && !busy && (
+              <button
+                onClick={refreshPreview}
+                aria-label={t.buildRefreshPreview}
+                title={t.buildRefreshPreview}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#7c3aed] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7c3aed]/30 transition-colors"
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
+                  <path d="M13.5 2v3h-3" />
+                </svg>
+              </button>
+            )}
           </div>
           <div className="relative flex-1 bg-white">
             <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-8">
               <div className="h-full w-full sm:max-w-[420px] sm:h-auto sm:aspect-[9/16] sm:max-h-[85vh] rounded-3xl sm:shadow-2xl sm:shadow-black/[0.06] sm:ring-1 sm:ring-black/[0.04] overflow-hidden">
-                <iframe ref={frameA} title="A" className="absolute inset-0 w-full h-full border-0 transition-opacity duration-200"
+                <iframe ref={frameA} title="A" className="absolute inset-0 w-full h-full border-0 transition-opacity duration-100"
                   style={{ opacity: active === 0 ? 1 : 0, pointerEvents: active === 0 ? "auto" : "none", zIndex: active === 0 ? 2 : 1 }}
-                  sandbox="allow-scripts allow-same-origin allow-modals allow-forms" />
-                <iframe ref={frameB} title="B" className="absolute inset-0 w-full h-full border-0 transition-opacity duration-200"
+                  sandbox="allow-scripts allow-modals allow-forms" referrerPolicy="no-referrer" />
+                <iframe ref={frameB} title="B" className="absolute inset-0 w-full h-full border-0 transition-opacity duration-100"
                   style={{ opacity: active === 1 ? 1 : 0, pointerEvents: active === 1 ? "auto" : "none", zIndex: active === 1 ? 2 : 1 }}
-                  sandbox="allow-scripts allow-same-origin allow-modals allow-forms" />
+                  sandbox="allow-scripts allow-modals allow-forms" referrerPolicy="no-referrer" />
               </div>
             </div>
             {!html && !busy && (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-[#cbd5e1] z-0">
-                <p className="text-base font-semibold text-[#94a3b8]">{t.buildPreviewEmpty}</p>
+                <p className="text-base font-semibold text-[#64748b]">{t.buildPreviewEmpty}</p>
                 <p className="text-sm text-[#cbd5e1] mt-1">{t.buildPreviewHint}</p>
               </div>
             )}
           </div>
         </div>
       </div>
+      <ConfirmDialog
+        open={confirmReset}
+        title={t.buildAbortConfirm}
+        message={t.buildAbortConfirm}
+        confirmLabel={t.otherProjects}
+        cancelLabel={t.dialogCancel}
+        destructive
+        onConfirm={doReset}
+        onCancel={() => setConfirmReset(false)}
+      />
+      <ConfirmDialog
+        open={deletingProjectId !== null}
+        title={t.buildDeleteProjectTitle}
+        message={t.buildDeleteProjectConfirm.replace("{name}", deletingProjectName)}
+        confirmLabel={t.dashDelete}
+        destructive
+        onConfirm={confirmDeleteProject}
+        onCancel={() => setDeletingProjectId(null)}
+      />
+      {quotaExceeded && (
+        <ConfirmDialog
+          open
+          title={t.quotaExceededTitle}
+          message={t.quotaExceededDesc
+            .replace("{used}", quotaExceeded.used.toLocaleString())
+            .replace("{quota}", quotaExceeded.quota.toLocaleString())
+            .replace("{tier}", quotaExceeded.tier)}
+          confirmLabel={t.quotaUpgrade}
+          cancelLabel={t.dialogCancel}
+          onConfirm={() => { setQuotaExceeded(null); router.push("/pricing"); }}
+          onCancel={() => setQuotaExceeded(null)}
+        />
+      )}
     </div>
   );
 }

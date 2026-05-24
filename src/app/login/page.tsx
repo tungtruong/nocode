@@ -15,14 +15,24 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const trimmed = email.trim();
+    // Basic email shape check before hitting the API.
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setError(t.loginError);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: email.trim(), password }) });
+      const res = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: trimmed, password }) });
       const data = await res.json();
       if (!res.ok) { setError(data.error || t.loginError); setLoading(false); return; }
       const params = new URLSearchParams(window.location.search);
-      router.push(params.get("redirect") || "/builder");
+      const requested = params.get("redirect") || "/builder";
+      // Only allow same-origin paths. Block protocol-relative ("//evil.com"), absolute URLs ("http://..."),
+      // and anything that doesn't start with a single "/".
+      const safe = /^\/(?!\/)/.test(requested) ? requested : "/builder";
+      router.push(safe);
     } catch { setError(t.loginError); setLoading(false); }
   };
 
@@ -43,16 +53,20 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="mb-1.5 block text-xs font-medium text-[#71717a]">{t.loginEmail}</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="demo@nocode.dev" required autoComplete="email" className="w-full rounded-xl border border-[#e8e8ec] bg-white px-4 py-2.5 text-sm text-[#18181b] placeholder:text-[#d4d4d8] focus:border-[#7c3aed] focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/10 transition-all" />
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" required autoComplete="email" className="w-full rounded-xl border border-[#e8e8ec] bg-white px-4 py-2.5 text-sm text-[#18181b] placeholder:text-[#d4d4d8] focus:border-[#7c3aed] focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/10 transition-all" />
             </div>
             <div>
               <label className="mb-1.5 block text-xs font-medium text-[#71717a]">{t.loginPassword}</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="demo123" required autoComplete="current-password" className="w-full rounded-xl border border-[#e8e8ec] bg-white px-4 py-2.5 text-sm text-[#18181b] placeholder:text-[#d4d4d8] focus:border-[#7c3aed] focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/10 transition-all" />
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required autoComplete="current-password" className="w-full rounded-xl border border-[#e8e8ec] bg-white px-4 py-2.5 text-sm text-[#18181b] placeholder:text-[#d4d4d8] focus:border-[#7c3aed] focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/10 transition-all" />
             </div>
             {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs text-red-600">{error}</div>}
             <button type="submit" disabled={loading} className="w-full rounded-xl bg-[#7c3aed] py-2.5 text-sm font-semibold text-white hover:bg-[#6d28d9] disabled:opacity-50 transition-all shadow-sm shadow-[#7c3aed]/20">{loading ? t.loginLoading : t.loginBtn}</button>
           </form>
-          <p className="mt-5 text-center text-xs text-[#d4d4d8]">{t.loginDemo} <span className="text-[#a1a1aa] font-medium">demo@nocode.dev</span> / <span className="text-[#a1a1aa] font-medium">demo123</span></p>
+          <p className="mt-5 text-center text-xs text-[#94a3b8]">
+            {t.loginNoAccount}{" "}
+            <Link href="/signup" className="text-[#7c3aed] hover:text-[#6d28d9] font-medium">{t.signup}</Link>
+          </p>
+          <p className="mt-2 text-center text-[10px] text-[#cbd5e1]">{t.loginDemo} <span className="font-medium">demo@nocode.dev</span> / <span className="font-medium">demo123</span></p>
         </div>
         <div className="mt-4 text-center"><LangToggle /></div>
       </div>

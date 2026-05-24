@@ -37,13 +37,16 @@ export function useLang() {
 }
 
 export function LangToggle() {
-  const { lang, toggle } = useLang();
+  const { lang, toggle, t } = useLang();
+  const nextLang = lang === "vi" ? "EN" : "VI";
   return (
     <button
       onClick={toggle}
-      className="rounded-lg px-2 py-1 text-xs font-medium text-[#94a3b8] hover:text-[#64748b] hover:bg-[#f1f5f9] transition-all"
+      aria-label={`${t.langSwitch ?? "Switch language"} → ${nextLang}`}
+      title={t.langSwitch ?? "Switch language"}
+      className="rounded-lg px-2 py-1 text-xs font-medium text-[#64748b] hover:text-[#334155] hover:bg-[#f1f5f9] transition-all"
     >
-      {lang === "vi" ? "EN" : "VI"}
+      {nextLang}
     </button>
   );
 }
