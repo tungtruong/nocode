@@ -1,0 +1,162 @@
+// PayPal Subscriptions API (REST, no SDK) — Stripe doesn't accept Vietnamese
+// business accounts so PayPal is the practical recurring-billing provider.
+//
+// Flow:
+//   1. Client POSTs to /api/checkout { tier }
+//   2. Server creates a v1/billing/subscriptions resource against a Plan ID
+//      (Plans are created once in PayPal Dashboard, one per tier).
+//   3. PayPal returns an approval link; client redirects there.
+//   4. User approves on paypal.com → back to our return_url.
+//   5. PayPal fires BILLING.SUBSCRIPTION.ACTIVATED webhook → we flip tier.
+
+import type { Tier } from "@/lib/quota";
+
+export function paypalConfigured(): boolean {
+  return !!(process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_CLIENT_SECRET);
+}
+
+function baseUrl(): string {
+  // sandbox = test mode, live = production. Default to sandbox to avoid
+  // accidentally charging real cards while you're still wiring things up.
+  return process.env.PAYPAL_MODE === "live"
+    ? "https://api-m.paypal.com"
+    : "https://api-m.sandbox.paypal.com";
+}
+
+export function planIdFor(tier: Tier): string | null {
+  if (tier === "pro") return process.env.PAYPAL_PLAN_PRO || null;
+  if (tier === "team") return process.env.PAYPAL_PLAN_TEAM || null;
+  return null;
+}
+
+export function tierFromPlanId(planId: string): Tier | null {
+  if (planId === process.env.PAYPAL_PLAN_PRO) return "pro";
+  if (planId === process.env.PAYPAL_PLAN_TEAM) return "team";
+  return null;
+}
+
+// Cached OAuth token. PayPal access tokens last ~9 hours; we refresh proactively
+// 5 minutes before expiry so an in-flight request never trips on expiration.
+let _token: { value: string; expiresAt: number } | null = null;
+async function getAccessToken(): Promise<string> {
+  if (_token && _token.expiresAt > Date.now() + 5 * 60_000) return _token.value;
+  const id = process.env.PAYPAL_CLIENT_ID!;
+  const secret = process.env.PAYPAL_CLIENT_SECRET!;
+  const r = await fetch(`${baseUrl()}/v1/oauth2/token`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString("base64")}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "grant_type=client_credentials",
+  });
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error(`paypal token ${r.status}: ${body.slice(0, 200)}`);
+  }
+  const data = (await r.json()) as { access_token: string; expires_in: number };
+  _token = { value: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
+  return _token.value;
+}
+
+export async function paypalFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = await getAccessToken();
+  const r = await fetch(`${baseUrl()}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(init.headers || {}),
+    },
+  });
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error(`paypal ${path} ${r.status}: ${body.slice(0, 400)}`);
+  }
+  // 204 No Content is common (e.g. cancel-subscription).
+  if (r.status === 204) return undefined as unknown as T;
+  return (await r.json()) as T;
+}
+
+// Create a subscription and return the URL the user must visit to approve it.
+// We pass our user's email in `custom_id` so the webhook can credit the right
+// account even before the user comes back from PayPal.
+export interface CreatedSubscription {
+  id: string;
+  approvalUrl: string;
+}
+export async function createSubscription(opts: {
+  planId: string;
+  email: string;
+  tier: Tier;
+  returnUrl: string;
+  cancelUrl: string;
+}): Promise<CreatedSubscription> {
+  const sub = await paypalFetch<{ id: string; links: Array<{ href: string; rel: string }> }>(
+    "/v1/billing/subscriptions",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        plan_id: opts.planId,
+        custom_id: opts.email,
+        subscriber: { email_address: opts.email },
+        application_context: {
+          brand_name: "nocode",
+          locale: "vi-VN",
+          shipping_preference: "NO_SHIPPING",
+          user_action: "SUBSCRIBE_NOW",
+          payment_method: { payer_selected: "PAYPAL", payee_preferred: "IMMEDIATE_PAYMENT_REQUIRED" },
+          return_url: opts.returnUrl,
+          cancel_url: opts.cancelUrl,
+        },
+      }),
+    }
+  );
+  const approval = sub.links.find((l) => l.rel === "approve");
+  if (!approval) throw new Error("No approval link in PayPal response");
+  return { id: sub.id, approvalUrl: approval.href };
+}
+
+// Verify webhook authenticity by asking PayPal to do it. They sign each event
+// with a key tied to PAYPAL_WEBHOOK_ID; we hand the headers + raw body back to
+// /v1/notifications/verify-webhook-signature and trust the SUCCESS verdict.
+export async function verifyWebhook(opts: {
+  headers: Record<string, string>;
+  body: string; // raw JSON
+}): Promise<boolean> {
+  const webhookId = process.env.PAYPAL_WEBHOOK_ID;
+  if (!webhookId) return false;
+  // PayPal is case-sensitive about header names in the verify payload.
+  const h = (k: string) => opts.headers[k.toLowerCase()] || opts.headers[k] || "";
+  const payload = {
+    auth_algo: h("paypal-auth-algo"),
+    cert_url: h("paypal-cert-url"),
+    transmission_id: h("paypal-transmission-id"),
+    transmission_sig: h("paypal-transmission-sig"),
+    transmission_time: h("paypal-transmission-time"),
+    webhook_id: webhookId,
+    webhook_event: JSON.parse(opts.body),
+  };
+  try {
+    const res = await paypalFetch<{ verification_status: string }>(
+      "/v1/notifications/verify-webhook-signature",
+      { method: "POST", body: JSON.stringify(payload) }
+    );
+    return res.verification_status === "SUCCESS";
+  } catch (e) {
+    console.error("[paypal] webhook verify failed:", e instanceof Error ? e.message : e);
+    return false;
+  }
+}
+
+export async function getSubscription(id: string): Promise<{
+  id: string;
+  status: string;
+  plan_id: string;
+  billing_info?: { next_billing_time?: string };
+  subscriber?: { email_address?: string };
+  custom_id?: string;
+}> {
+  return paypalFetch(`/v1/billing/subscriptions/${id}`);
+}
