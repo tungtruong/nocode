@@ -65,13 +65,53 @@ function migrate(db: Database.Database) {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    -- Invitation codes that unlock paid tiers without going through Stripe.
+    -- benefit_type:
+    --   'free_pro'  → bumps tier to pro for benefit_value days
+    --   'free_team' → bumps tier to team for benefit_value days
+    -- Set max_redemptions = 1 for one-shot personal codes, higher for campaigns.
+    CREATE TABLE IF NOT EXISTS invitation_codes (
+      code TEXT PRIMARY KEY COLLATE NOCASE,
+      benefit_type TEXT NOT NULL,
+      benefit_value INTEGER NOT NULL,
+      max_redemptions INTEGER NOT NULL DEFAULT 1,
+      used_count INTEGER NOT NULL DEFAULT 0,
+      expires_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- One row per (user, code) redemption — prevents the same user from
+    -- redeeming the same code twice and gives us a paper trail.
+    CREATE TABLE IF NOT EXISTS redemptions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT NOT NULL COLLATE NOCASE,
+      user_email TEXT NOT NULL COLLATE NOCASE,
+      redeemed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(code, user_email)
+    );
   `);
 
   // ALTER for tables that pre-existed before the `tier` column was introduced.
   // SQLite has no IF NOT EXISTS on ALTER, so we sniff PRAGMA table_info first.
   const cols = db.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>;
-  if (!cols.some((c) => c.name === "tier")) {
+  const has = (name: string) => cols.some((c) => c.name === name);
+  if (!has("tier")) {
     db.exec("ALTER TABLE users ADD COLUMN tier TEXT NOT NULL DEFAULT 'free'");
+  }
+  // Stripe linkage. Nullable so users without a paid plan have empty columns.
+  if (!has("stripe_customer_id")) {
+    db.exec("ALTER TABLE users ADD COLUMN stripe_customer_id TEXT");
+  }
+  if (!has("stripe_subscription_id")) {
+    db.exec("ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT");
+  }
+  if (!has("subscription_status")) {
+    // active | trialing | past_due | canceled | incomplete | null
+    db.exec("ALTER TABLE users ADD COLUMN subscription_status TEXT");
+  }
+  if (!has("subscription_renews_at")) {
+    db.exec("ALTER TABLE users ADD COLUMN subscription_renews_at TEXT");
   }
 }
 

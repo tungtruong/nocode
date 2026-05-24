@@ -89,8 +89,19 @@ function isUnlimited(): boolean {
 }
 
 export function tierFor(email: string): Tier {
-  const row = getDb().prepare("SELECT tier FROM users WHERE email = ?").get(email) as { tier?: string } | undefined;
-  const t = (row?.tier || "free") as Tier;
+  const row = getDb()
+    .prepare("SELECT tier, subscription_renews_at, subscription_status FROM users WHERE email = ?")
+    .get(email) as { tier?: string; subscription_renews_at?: string | null; subscription_status?: string | null } | undefined;
+  let t = (row?.tier || "free") as Tier;
+  // Trial (invitation code) and canceled subs: drop back to free once the
+  // renewal date passes. Active paid subs (Stripe) are renewed automatically
+  // via the webhook so we don't need to expire them here.
+  const renews = row?.subscription_renews_at ? new Date(row.subscription_renews_at).getTime() : null;
+  const expired = renews !== null && renews < Date.now();
+  const status = row?.subscription_status;
+  if (t !== "free" && expired && (status === "trial" || status === "canceled" || !status)) {
+    t = "free";
+  }
   return t in TIER_LIMITS ? t : "free";
 }
 

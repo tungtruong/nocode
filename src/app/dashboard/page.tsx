@@ -32,6 +32,35 @@ export default function DashboardPage() {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [redeemOpen, setRedeemOpen] = useState(false);
+  const [redeemCode, setRedeemCode] = useState("");
+  const [redeemMsg, setRedeemMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [redeemBusy, setRedeemBusy] = useState(false);
+
+  const submitRedeem = async () => {
+    const code = redeemCode.trim();
+    if (!code) return;
+    setRedeemBusy(true);
+    setRedeemMsg(null);
+    try {
+      const r = await fetch("/api/redeem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        setRedeemMsg({ kind: "err", text: d.error || "Lỗi" });
+      } else {
+        setRedeemMsg({ kind: "ok", text: `Đã nâng cấp gói ${d.tier} trong ${d.daysGranted} ngày.` });
+        setRedeemCode("");
+      }
+    } catch {
+      setRedeemMsg({ kind: "err", text: "Lỗi kết nối" });
+    } finally {
+      setRedeemBusy(false);
+    }
+  };
 
   useEffect(() => {
     Promise.all([
@@ -92,6 +121,7 @@ export default function DashboardPage() {
             <h1 className="text-2xl font-bold">{t.dashTitle}</h1>
             <p className="text-sm text-[#71717a]">{t.dashDesc}</p>
           </div>
+          <button onClick={() => setRedeemOpen(true)} className="text-xs rounded-lg border border-[#7c3aed]/20 bg-[#7c3aed]/[0.04] px-3 py-1.5 text-[#7c3aed] hover:bg-[#7c3aed]/[0.08] transition-colors">{t.dashRedeem}</button>
           <button onClick={handleLogout} className="text-xs text-[#64748b] hover:text-[#64748b] transition-colors">{t.signout}</button>
         </div>
 
@@ -157,6 +187,7 @@ export default function DashboardPage() {
                   <div className="flex items-center gap-2 shrink-0">
                     <a href={app.meta.url} target="_blank" rel="noopener noreferrer" className="rounded-xl bg-[#7c3aed] px-4 py-2 text-xs font-medium text-white hover:bg-[#6d28d9] transition-all">{t.dashOpen}</a>
                     <button onClick={() => copyLink(app.meta.url)} className="rounded-xl border border-[#e8e8ec] bg-white px-3 py-2 text-xs text-[#71717a] hover:text-[#18181b] hover:border-[#d4d4d8] transition-all">{copied === app.meta.url ? t.dashCopied : t.dashCopy}</button>
+                    <a href={`/api/apps/${app.id}/download`} className="rounded-xl border border-[#e8e8ec] bg-white px-3 py-2 text-xs text-[#71717a] hover:text-[#18181b] hover:border-[#d4d4d8] transition-all">{t.dashDownload}</a>
                     <button onClick={() => requestDelete(app.id)} className="rounded-xl border border-red-100 bg-white px-3 py-2 text-xs text-red-500 hover:bg-red-50 hover:border-red-200 transition-all">{t.dashDelete}</button>
                   </div>
                 </div>
@@ -174,6 +205,52 @@ export default function DashboardPage() {
         onConfirm={confirmDelete}
         onCancel={() => setDeletingId(null)}
       />
+
+      {redeemOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#0f172a]/40 backdrop-blur-sm px-4"
+          onClick={(e) => { if (e.target === e.currentTarget) { setRedeemOpen(false); setRedeemMsg(null); } }}
+        >
+          <div className="w-full max-w-sm rounded-2xl border border-[#e2e8f0] bg-white p-5 shadow-2xl shadow-black/10">
+            <h2 className="text-base font-semibold text-[#0f172a] mb-1">{t.dashRedeemTitle}</h2>
+            <p className="text-sm text-[#475569] mb-4">{t.dashRedeemDesc}</p>
+            <input
+              type="text"
+              value={redeemCode}
+              onChange={(e) => setRedeemCode(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") submitRedeem(); else if (e.key === "Escape") { setRedeemOpen(false); setRedeemMsg(null); } }}
+              placeholder="VIBE-EARLY-2026"
+              autoFocus
+              spellCheck={false}
+              className="w-full rounded-xl border border-[#e8e8ec] bg-white px-4 py-2.5 text-sm uppercase tracking-wider text-[#18181b] placeholder:text-[#cbd5e1] focus:border-[#7c3aed] focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/10"
+            />
+            {redeemMsg && (
+              <div className={`mt-3 rounded-xl border px-3 py-2 text-xs ${redeemMsg.kind === "ok" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-red-200 bg-red-50 text-red-600"}`}>
+                {redeemMsg.text}
+              </div>
+            )}
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setRedeemOpen(false); setRedeemMsg(null); }}
+                className="rounded-xl border border-[#e2e8f0] bg-white px-4 py-2 text-sm font-medium text-[#475569] hover:bg-[#f8fafc]"
+              >
+                {t.dialogCancel}
+              </button>
+              <button
+                type="button"
+                onClick={submitRedeem}
+                disabled={redeemBusy || !redeemCode.trim()}
+                className="rounded-xl bg-[#7c3aed] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#6d28d9] disabled:opacity-50"
+              >
+                {redeemBusy ? "..." : t.dashRedeem}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
