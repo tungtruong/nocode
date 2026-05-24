@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useLang, LangToggle } from "@/components/LangProvider";
 
@@ -11,6 +11,10 @@ export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const searchParams = useSearchParams();
+  // Derived directly from the URL — no need for useState/useEffect
+  // round-trip just to read a query param.
+  const ref = useMemo(() => (searchParams.get("ref") || "").toUpperCase(), [searchParams]);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
@@ -31,7 +35,7 @@ export default function SignupPage() {
       const res = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: trimmedEmail, password, name: name.trim() }),
+        body: JSON.stringify({ email: trimmedEmail, password, name: name.trim(), ref: ref || undefined }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -59,7 +63,12 @@ export default function SignupPage() {
         </div>
         <div className="rounded-2xl border border-[#e8e8ec] bg-white p-7 shadow-sm">
           <h2 className="mb-1 text-xl font-semibold text-[#18181b]">{t.signupTitle}</h2>
-          <p className="mb-7 text-sm text-[#64748b]">{t.signupSub}</p>
+          <p className="mb-3 text-sm text-[#64748b]">{t.signupSub}</p>
+          {ref && (
+            <div className="mb-4 rounded-xl border border-[#7c3aed]/20 bg-[#7c3aed]/[0.04] px-3 py-2 text-xs text-[#7c3aed]">
+              {t.signupReferralBadge} <span className="font-mono font-semibold">{ref}</span>
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="mb-1.5 block text-xs font-medium text-[#71717a]">{t.signupName}</label>

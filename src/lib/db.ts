@@ -90,6 +90,24 @@ function migrate(db: Database.Database) {
       redeemed_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(code, user_email)
     );
+
+    -- Affiliate commissions. One row per Stripe invoice that's paid by a
+    -- referred user. UNIQUE on stripe_invoice_id makes the webhook safely
+    -- idempotent (Stripe re-fires events sometimes).
+    CREATE TABLE IF NOT EXISTS commissions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      referrer_email TEXT NOT NULL COLLATE NOCASE,
+      referred_email TEXT NOT NULL COLLATE NOCASE,
+      amount_cents INTEGER NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'USD',
+      stripe_invoice_id TEXT UNIQUE,
+      status TEXT NOT NULL DEFAULT 'pending',
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      paid_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS commissions_referrer_idx
+      ON commissions(referrer_email, created_at DESC);
   `);
 
   // ALTER for tables that pre-existed before the `tier` column was introduced.
@@ -112,6 +130,15 @@ function migrate(db: Database.Database) {
   }
   if (!has("subscription_renews_at")) {
     db.exec("ALTER TABLE users ADD COLUMN subscription_renews_at TEXT");
+  }
+  // Referrals
+  if (!has("referral_code")) {
+    db.exec("ALTER TABLE users ADD COLUMN referral_code TEXT");
+    // UNIQUE constraint via index (ALTER TABLE in SQLite can't add UNIQUE col)
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_referral_code_idx ON users(referral_code) WHERE referral_code IS NOT NULL");
+  }
+  if (!has("referred_by_email")) {
+    db.exec("ALTER TABLE users ADD COLUMN referred_by_email TEXT");
   }
 }
 

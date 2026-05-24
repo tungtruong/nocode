@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLang, LangToggle } from "@/components/LangProvider";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ReferralWidget } from "@/components/ReferralWidget";
 
 interface AppItem {
   id: string;
@@ -124,6 +125,8 @@ export default function DashboardPage() {
           <button onClick={() => setRedeemOpen(true)} className="text-xs rounded-lg border border-[#7c3aed]/20 bg-[#7c3aed]/[0.04] px-3 py-1.5 text-[#7c3aed] hover:bg-[#7c3aed]/[0.08] transition-colors">{t.dashRedeem}</button>
           <button onClick={handleLogout} className="text-xs text-[#64748b] hover:text-[#64748b] transition-colors">{t.signout}</button>
         </div>
+
+        <ReferralWidget />
 
         {loading && (
           <div className="space-y-3" aria-label={t.dashLoading} aria-busy="true">

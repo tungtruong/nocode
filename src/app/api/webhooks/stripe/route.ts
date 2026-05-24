@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { getStripe, tierFromPriceId } from "@/lib/stripe";
 import { getDb } from "@/lib/db";
+import { maybeRecordCommission } from "@/lib/referrals";
 
 // Stripe sends signed events to this endpoint. We verify the signature with
 // STRIPE_WEBHOOK_SECRET, then update the user row when their subscription
@@ -83,6 +84,28 @@ export async function POST(req: NextRequest) {
              tier = 'free'
            WHERE stripe_customer_id = ?`
         ).run(sub.customer as string);
+        break;
+      }
+      case "invoice.paid": {
+        // Successful payment — credit referral commission if this customer
+        // came in through a referral link AND it's their first paid invoice.
+        const inv = event.data.object as Stripe.Invoice;
+        // DeletedCustomer has no email; only Customer does. Fall back to the
+        // invoice's own customer_email field which is always present.
+        const cust = inv.customer;
+        const custEmail = cust && typeof cust !== "string" && !("deleted" in cust)
+          ? cust.email
+          : null;
+        const email = (inv.customer_email || custEmail || "").toLowerCase();
+        if (email && inv.id && typeof inv.amount_paid === "number" && inv.amount_paid > 0) {
+          const result = maybeRecordCommission({
+            invoiceId: inv.id,
+            customerEmail: email,
+            amountPaidCents: inv.amount_paid,
+            currency: inv.currency || "usd",
+          });
+          if (result.recorded) console.log(`[Stripe] referral commission recorded for ${email}, invoice=${inv.id}`);
+        }
         break;
       }
       case "invoice.payment_failed": {

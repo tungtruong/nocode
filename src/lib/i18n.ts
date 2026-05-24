@@ -56,6 +56,7 @@ export const t = {
     signupBadPassword: "Mật khẩu cần ít nhất 8 ký tự",
     signupPasswordHint: "Tối thiểu 8 ký tự",
     signupHaveAccount: "Đã có tài khoản?",
+    signupReferralBadge: "Đăng ký qua link giới thiệu — mã:",
 
     // Pricing
     pricingTitle: "Bảng giá rõ ràng, minh bạch",
@@ -158,6 +159,17 @@ export const t = {
     dashRedeem: "Nhập mã mời",
     dashRedeemTitle: "Mã mời / Mã khuyến mãi",
     dashRedeemDesc: "Nhập mã bạn nhận được để mở khóa gói Pro hoặc Team miễn phí trong thời gian giới hạn.",
+    refTitle: "Giới thiệu kiếm hoa hồng",
+    refDesc: "Chia sẻ link bên dưới. Mỗi khi bạn bè nâng cấp gói, bạn nhận 30% giá trị thanh toán đầu tiên.",
+    refCommissionLabel: "Hoa hồng",
+    refStatTotal: "Đã giới thiệu",
+    refStatPaying: "Trả phí",
+    refStatEarned: "Tổng kiếm được",
+    refCopyLink: "Sao chép link",
+    refCodePrefix: "Mã của bạn",
+    refRecentLabel: "Hoa hồng gần đây",
+    refStatusPending: "Chờ thanh toán",
+    refStatusPaid: "Đã thanh toán",
   },
 
   en: {
@@ -215,6 +227,7 @@ export const t = {
     signupBadPassword: "Password must be at least 8 characters",
     signupPasswordHint: "Minimum 8 characters",
     signupHaveAccount: "Already have an account?",
+    signupReferralBadge: "Signing up via referral — code:",
 
     // Pricing
     pricingTitle: "Simple, transparent pricing",
@@ -317,5 +330,16 @@ export const t = {
     dashRedeem: "Redeem code",
     dashRedeemTitle: "Invitation / Promo code",
     dashRedeemDesc: "Enter a code to unlock Pro or Team plan free for a limited time.",
+    refTitle: "Refer & earn",
+    refDesc: "Share the link below. You earn 30% of every referred user's first payment.",
+    refCommissionLabel: "Commission",
+    refStatTotal: "Referred",
+    refStatPaying: "Paying",
+    refStatEarned: "Total earned",
+    refCopyLink: "Copy link",
+    refCodePrefix: "Your code",
+    refRecentLabel: "Recent commissions",
+    refStatusPending: "Pending",
+    refStatusPaid: "Paid",
   },
 } as const;
