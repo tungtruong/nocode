@@ -3,9 +3,23 @@ import { v4 as uuidv4 } from "uuid";
 import fs from "fs/promises";
 import path from "path";
 import { requireSession, authError } from "@/lib/auth";
-import { addApp, type AppMeta } from "@/lib/store";
+import { addApp, pickSlug } from "@/lib/store";
 
 const MAX_HTML_SIZE = 5 * 1024 * 1024; // 5MB
+
+// Build the user-facing URL for a deployed app. If APPS_DOMAIN is set
+// (e.g. "vibemvp.io" with a `*.vibemvp.io` wildcard DNS record pointed at
+// this server), serve as `<slug>.<APPS_DOMAIN>`. Otherwise fall back to the
+// path-based `/apps/<id>` URL on the base host.
+function appUrl(slug: string, id: string): string {
+  const appsDomain = process.env.APPS_DOMAIN;
+  if (appsDomain) {
+    const scheme = process.env.DEV_INSECURE_COOKIE === "true" ? "http" : "https";
+    return `${scheme}://${slug}.${appsDomain}`;
+  }
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3002";
+  return `${baseUrl}/apps/${id}`;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -29,22 +43,23 @@ export async function POST(req: NextRequest) {
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "index.html"), html, "utf-8");
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3002";
-    const url = `${baseUrl}/apps/${id}`;
+    // Slug = pretty URL component, picked once and persisted with the app.
+    const slug = pickSlug(title || "app", id);
+    const url = appUrl(slug, id);
 
-    // Save app metadata with user association
     try {
       addApp(id, {
         user_email: session.email,
         title: title || "Untitled App",
         url,
         created_at: new Date().toISOString(),
+        slug,
       });
     } catch (e) {
       console.error("Store error:", e);
     }
 
-    return NextResponse.json({ url, id });
+    return NextResponse.json({ url, id, slug });
   } catch {
     return NextResponse.json({ error: "Lỗi máy chủ" }, { status: 500 });
   }

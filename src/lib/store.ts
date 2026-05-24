@@ -7,6 +7,71 @@ export interface AppMeta {
   title: string;
   url: string;
   created_at: string;
+  slug?: string | null;
+}
+
+// Slug: 5-12 lowercase alphanumerics + dashes, no leading/trailing dash.
+// We carve out 'www', 'app', 'apps', 'api' so they can't be claimed by users
+// and collide with platform routes if we ever add subdomains for them.
+const RESERVED_SLUGS = new Set(["www", "app", "apps", "api", "admin", "dashboard", "auth", "static", "assets"]);
+function isValidSlug(s: string): boolean {
+  if (!s || s.length < 3 || s.length > 32) return false;
+  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(s)) return false;
+  if (RESERVED_SLUGS.has(s)) return false;
+  return true;
+}
+
+function slugifyTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 24);
+}
+
+// Pick a unique slug: try title-derived, fall back to title + random suffix.
+// Caller already holds enough context (title + a fresh app id) — we just need
+// to make sure no other app owns the same slug.
+export function pickSlug(title: string, fallbackId: string): string {
+  const base = slugifyTitle(title) || fallbackId.slice(0, 6);
+  if (isValidSlug(base) && !appBySlug(base)) return base;
+  // Append a 4-char suffix from the id until we hit a free one (very few tries).
+  for (let i = 0; i < 6; i++) {
+    const suffix = fallbackId.slice(i * 2, i * 2 + 4) || Math.random().toString(36).slice(2, 6);
+    const candidate = `${base.slice(0, 24)}-${suffix}`.toLowerCase();
+    if (isValidSlug(candidate) && !appBySlug(candidate)) return candidate;
+  }
+  // Last resort.
+  return fallbackId.slice(0, 8);
+}
+
+export function appBySlug(slug: string): { id: string; meta: AppMeta } | null {
+  if (!isValidSlug(slug)) return null;
+  const r = getDb()
+    .prepare("SELECT id, user_email, title, url, created_at, slug FROM apps WHERE slug = ?")
+    .get(slug) as { id: string; user_email: string; title: string; url: string; created_at: string; slug: string | null } | undefined;
+  if (!r) return null;
+  return {
+    id: r.id,
+    meta: { user_email: r.user_email, title: r.title, url: r.url, created_at: r.created_at, slug: r.slug },
+  };
+}
+
+// Update slug for an app (rename). Returns true if changed; false on
+// conflict or invalid input. Caller should check ownership separately.
+export function setAppSlug(id: string, slug: string): boolean {
+  if (!isValidSlug(slug)) return false;
+  if (!isSafeId(id)) return false;
+  try {
+    const r = getDb().prepare("UPDATE apps SET slug = ? WHERE id = ?").run(slug, id);
+    return r.changes > 0;
+  } catch {
+    // UNIQUE collision on slug
+    return false;
+  }
 }
 
 // Safe id: only [a-zA-Z0-9_-], length 6-64. Prevents path traversal in deleteApp.
@@ -16,27 +81,35 @@ function isSafeId(id: string): boolean {
 
 export async function addApp(id: string, meta: AppMeta): Promise<void> {
   if (!isSafeId(id)) throw new Error("Invalid app id");
+  // Allocate a vanity slug on first save so the deployed URL can use
+  // <slug>.<APPS_DOMAIN> immediately. Existing apps keep their old slug
+  // (INSERT OR REPLACE would clobber it otherwise — we re-read first).
+  let slug = meta.slug ?? null;
+  if (!slug) {
+    const existing = getDb().prepare("SELECT slug FROM apps WHERE id = ?").get(id) as { slug: string | null } | undefined;
+    slug = existing?.slug ?? pickSlug(meta.title, id);
+  }
   getDb()
-    .prepare("INSERT OR REPLACE INTO apps (id, user_email, title, url, created_at) VALUES (?, ?, ?, ?, ?)")
-    .run(id, meta.user_email, meta.title, meta.url, meta.created_at);
+    .prepare("INSERT OR REPLACE INTO apps (id, user_email, title, url, created_at, slug) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(id, meta.user_email, meta.title, meta.url, meta.created_at, slug);
 }
 
 export async function getAppsByUser(email: string): Promise<{ id: string; meta: AppMeta }[]> {
   const rows = getDb()
-    .prepare("SELECT id, user_email, title, url, created_at FROM apps WHERE user_email = ? ORDER BY created_at DESC")
-    .all(email) as Array<{ id: string; user_email: string; title: string; url: string; created_at: string }>;
+    .prepare("SELECT id, user_email, title, url, created_at, slug FROM apps WHERE user_email = ? ORDER BY created_at DESC")
+    .all(email) as Array<{ id: string; user_email: string; title: string; url: string; created_at: string; slug: string | null }>;
   return rows.map((r) => ({
     id: r.id,
-    meta: { user_email: r.user_email, title: r.title, url: r.url, created_at: r.created_at },
+    meta: { user_email: r.user_email, title: r.title, url: r.url, created_at: r.created_at, slug: r.slug },
   }));
 }
 
 export async function getApp(id: string): Promise<AppMeta | null> {
   if (!isSafeId(id)) return null;
   const r = getDb()
-    .prepare("SELECT user_email, title, url, created_at FROM apps WHERE id = ?")
-    .get(id) as { user_email: string; title: string; url: string; created_at: string } | undefined;
-  return r ? { user_email: r.user_email, title: r.title, url: r.url, created_at: r.created_at } : null;
+    .prepare("SELECT user_email, title, url, created_at, slug FROM apps WHERE id = ?")
+    .get(id) as { user_email: string; title: string; url: string; created_at: string; slug: string | null } | undefined;
+  return r ? { user_email: r.user_email, title: r.title, url: r.url, created_at: r.created_at, slug: r.slug } : null;
 }
 
 export async function deleteApp(id: string, userEmail: string): Promise<boolean> {
