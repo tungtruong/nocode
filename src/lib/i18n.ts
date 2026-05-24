@@ -13,6 +13,9 @@ export const t = {
     newApp: "Dựng app mới",
     openApp: "Mở app",
     deploy: "Deploy",
+    buildDeploying: "Đang deploy...",
+    buildUpdateOpen: "Cập nhật & Mở →",
+    buildUpdateOpenHint: "Bản chỉnh sửa mới chưa được publish. Bấm để publish bản mới rồi mở.",
     otherProjects: "Dự án khác",
     deployLatest: "Deploy",
 
@@ -164,6 +167,9 @@ export const t = {
     newApp: "New App",
     openApp: "Open",
     deploy: "Deploy",
+    buildDeploying: "Deploying...",
+    buildUpdateOpen: "Update & Open →",
+    buildUpdateOpenHint: "Your latest edits aren't published yet. Click to publish the new version then open.",
     otherProjects: "Switch project",
     deployLatest: "Deploy",
 

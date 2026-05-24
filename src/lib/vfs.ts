@@ -1,4 +1,4 @@
-interface VirtualFiles {
+export interface VirtualFiles {
   [path: string]: string;
 }
 

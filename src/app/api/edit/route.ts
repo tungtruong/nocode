@@ -1,15 +1,58 @@
 import { NextRequest } from "next/server";
-import type OpenAI from "openai";
+import OpenAI from "openai";
+import { randomUUID } from "crypto";
 import {
   parseHtmlToFiles,
   mergeFilesToHtml,
   extractRelevantFiles,
+  type VirtualFiles,
 } from "@/lib/vfs";
 import { getToolDefinitions, executeTool } from "@/lib/tools";
 import { detectPromptViolation, scanGeneratedHtml, checkRateLimit } from "@/lib/security";
 import { requireSession, authError, type Session } from "@/lib/auth";
 import { getPrimary, getFallback, withFallback, type AiProvider } from "@/lib/ai";
 import { assertQuota, recordUsage, perRequestLimit, maxTurnsFor, weightedTokens } from "@/lib/quota";
+
+// === CLARIFY CACHE ===
+// When the agent asks the user to disambiguate a request, we pause the agent
+// and stash its conversation state (messages + virtual files) here keyed by a
+// random ID. The client renders the question with option buttons. When the
+// user picks one, the next /api/edit call sends `clarifyKey + choice`; we
+// restore the snapshot and resume the agent without re-reading every file
+// from scratch.
+interface ClarifySnapshot {
+  email: string;
+  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+  files: VirtualFiles;
+  currentHtml: string;
+  pinnedProvider: AiProvider | null;
+  totalPromptTokens: number;
+  totalCompletionTokens: number;
+  toolCalls: number;
+  turn: number;
+  expiresAt: number;
+}
+const clarifyCache = new Map<string, ClarifySnapshot>();
+const CLARIFY_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+function pruneClarifyCache() {
+  const now = Date.now();
+  for (const [k, v] of clarifyCache) if (v.expiresAt < now) clarifyCache.delete(k);
+}
+
+function parseClarify(text: string): { question: string; options: string[] } | null {
+  const m = text.match(/CLARIFY:\s*(.+?)\nOPTIONS:\s*\n([\s\S]+)/);
+  if (!m) return null;
+  const question = m[1].trim();
+  const options = m[2]
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("- "))
+    .map((l) => l.slice(2).trim())
+    .filter(Boolean);
+  if (!question || options.length < 2 || options.length > 4) return null;
+  return { question, options };
+}
 
 const AGENT_SYSTEM_PROMPT = `## ROLE
 You are a web app editor inside a no-code builder. Your ONLY job: read and edit HTML/CSS/JS source files of a web application. Nothing else.
@@ -39,6 +82,25 @@ The preview runs inside a sandboxed iframe with NO same-origin access. This mean
 - If you write \`localStorage.getItem(...)\` or similar, the entire <script> crashes and EVERY button on the page stops working.
 - Keep all state in JavaScript variables (\`let theme = 'dark';\`). To persist visually, just set the default on load.
 - If the user asks for "remember my choice" or "save", briefly say in the reply that persistence isn't available in preview, then implement in-memory state only.
+
+## CLARIFY WHEN AMBIGUOUS
+If the user request is genuinely ambiguous AND the choice would meaningfully change what you'd build (not a style nitpick), ASK before doing anything.
+
+To ask, your final reply MUST be in EXACTLY this format (no tool calls, no other text):
+
+CLARIFY: <one short question, Vietnamese>
+OPTIONS:
+- <option 1>
+- <option 2>
+- <option 3>
+
+Notes:
+- 2 to 4 options. Each ≤ 60 chars.
+- Don't use CLARIFY for tiny cosmetic decisions you can pick a reasonable default for.
+- Don't use CLARIFY just because a feature is complex — only when the user could mean meaningfully different things.
+
+Example trigger: user says "Thêm dashboard" — could be sales dashboard, user dashboard, settings dashboard. ASK.
+Example no-trigger: user says "Thêm nút đỏ" — pick the most natural color and proceed.
 
 ## EDITING RULES
 1. READ FIRST. Always call read_file before editing. But for a single-line color/text change, you may skip reading if you already saw the file in context.
@@ -93,7 +155,12 @@ export async function POST(req: NextRequest) {
     let session: Session;
     try { session = await requireSession(); } catch { return authError(); }
 
-    const { currentHtml, newMessage } = await req.json();
+    const body = await req.json();
+    const { currentHtml, newMessage, clarifyKey } = body as {
+      currentHtml?: string;
+      newMessage?: string;
+      clarifyKey?: string;
+    };
     if (!currentHtml || !newMessage || typeof currentHtml !== "string" || typeof newMessage !== "string") {
       return new Response(JSON.stringify({ error: "Thiếu dữ liệu" }), {
         status: 400,
@@ -111,6 +178,18 @@ export async function POST(req: NextRequest) {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
+    }
+
+    // Resume a previously-paused clarify? Pull the snapshot now so we can use
+    // its state in place of a fresh init below.
+    let resumed: ClarifySnapshot | null = null;
+    if (clarifyKey && typeof clarifyKey === "string") {
+      pruneClarifyCache();
+      const snap = clarifyCache.get(clarifyKey);
+      if (snap && snap.email === session.email) {
+        resumed = snap;
+        clarifyCache.delete(clarifyKey);
+      }
     }
 
     // Security checks
@@ -143,33 +222,40 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const files = parseHtmlToFiles(currentHtml);
-    // Snapshot of original CSS/JS so we can detect what's NEW after edits and
-    // verify every new class/function actually has a matching HTML element.
+    // VFS + agent state: fresh from currentHtml, OR resumed from a paused
+    // clarify (in which case we already have the agent's read_file results
+    // cached and just append the user's choice as the next message).
+    const files = resumed ? resumed.files : parseHtmlToFiles(currentHtml);
     const originalCss = files["/style.css"] || "";
     const originalJs = files["/script.js"] || "";
-    const relevant = extractRelevantFiles(files, newMessage);
-    const contextStr = relevant
-      .map((f) => `=== ${f.file} ===\n${f.content}`)
-      .join("\n\n");
 
-    console.log(`[EDIT] start currentHtml=${currentHtml.length}b relevant=${relevant.length}`);
+    let messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+    if (resumed) {
+      messages = resumed.messages;
+      messages.push({ role: "user", content: newMessage });
+      console.log(`[EDIT] resume from clarify, turn=${resumed.turn}, toolCalls=${resumed.toolCalls}`);
+    } else {
+      const relevant = extractRelevantFiles(files, newMessage);
+      const contextStr = relevant
+        .map((f) => `=== ${f.file} ===\n${f.content}`)
+        .join("\n\n");
+      console.log(`[EDIT] start currentHtml=${currentHtml.length}b relevant=${relevant.length}`);
+      messages = [
+        { role: "system", content: AGENT_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: `SOURCE FILES:\n\n${contextStr}\n\nUSER REQUEST: ${newMessage}`,
+        },
+      ];
+    }
 
     const tools = getToolDefinitions();
 
-    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      { role: "system", content: AGENT_SYSTEM_PROMPT },
-      {
-        role: "user",
-        content: `SOURCE FILES:\n\n${contextStr}\n\nUSER REQUEST: ${newMessage}`,
-      },
-    ];
-
-    // Track input + output separately — output is ~4× the cost per token on
-    // DeepSeek, so quota math must weight them differently.
-    let totalPromptTokens = 0;
-    let totalCompletionTokens = 0;
-    let toolCalls = 0;
+    // Token + tool counters: pick up where the snapshot left off so the
+    // per-request budget covers the whole conversation, not just the resume.
+    let totalPromptTokens = resumed?.totalPromptTokens ?? 0;
+    let totalCompletionTokens = resumed?.totalCompletionTokens ?? 0;
+    let toolCalls = resumed?.toolCalls ?? 0;
     const encoder = new TextEncoder();
 
     const stream = new ReadableStream({
@@ -199,11 +285,12 @@ export async function POST(req: NextRequest) {
         // short turns); maxTurns matters more for wall-clock latency.
         const maxTurns = maxTurnsFor(session.email);
         const tokenBudget = perRequestLimit(session.email);
-        let turn = 0;
+        let turn = resumed?.turn ?? 0;
         // We can fall back to OpenAI on the first turn (clean state), but once
         // the agent has invoked tools we have to stick with the same provider
         // — tool-call IDs and conversation state aren't portable across models.
-        let pinnedProvider: AiProvider | null = null;
+        // On resume, the pinned provider is restored from the snapshot.
+        let pinnedProvider: AiProvider | null = resumed?.pinnedProvider ?? null;
         // Allow exactly one auto-recovery turn when we detect orphan CSS/JS
         // (new classes/functions with no matching HTML element). Capped so we
         // don't loop forever if the model misinterprets the corrective prompt.
@@ -321,6 +408,46 @@ export async function POST(req: NextRequest) {
           }
 
           // Text response from AI — final reply.
+          // Check first: did the agent ask the user a clarifying question?
+          // If so, pause the loop, cache its state, and tell the client to
+          // render option buttons. The user's pick will resume this same
+          // conversation via clarifyKey instead of starting over.
+          const clarify = msg.content ? parseClarify(msg.content) : null;
+          if (clarify) {
+            const key = randomUUID();
+            // Push the agent's CLARIFY message into the conversation so the
+            // resume context is complete.
+            messages.push(msg);
+            clarifyCache.set(key, {
+              email: session.email,
+              messages,
+              files,
+              currentHtml,
+              pinnedProvider,
+              totalPromptTokens,
+              totalCompletionTokens,
+              toolCalls,
+              turn,
+              expiresAt: Date.now() + CLARIFY_TTL_MS,
+            });
+            // Charge tokens used so far — the clarify question was real work.
+            const billedClarify = weightedTokens(totalPromptTokens, totalCompletionTokens);
+            if (billedClarify > 0) recordUsage(session.email, totalPromptTokens, totalCompletionTokens);
+            console.log(`[EDIT] clarify key=${key} q=${JSON.stringify(clarify.question)} opts=${clarify.options.length}`);
+            sendProgress(
+              `clarify ${encodeURIComponent(JSON.stringify({ key, question: clarify.question, options: clarify.options }))}`
+            );
+            sendProgress(`done ${toolCalls} tools ${billedClarify} tokens (clarify)`);
+            // Stream the original HTML back so the preview doesn't go blank.
+            const echoBytes = encoder.encode(currentHtml);
+            for (let i = 0; i < echoBytes.length; i += 2048) {
+              if (closed) return;
+              safeEnqueue(echoBytes.slice(i, i + 2048));
+            }
+            safeClose();
+            return;
+          }
+
           // BEFORE accepting, do a soft validation: detect new CSS classes or
           // new JS functions the agent added without wiring up to the HTML.
           // (Common failure: agent adds a `.dark` rule and `toggleDark()` but

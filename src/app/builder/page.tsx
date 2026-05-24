@@ -112,7 +112,16 @@ function injectIntoBody(html: string, snippet: string): string {
   return html + snippet;
 }
 
-interface Msg { id: string; role: "user" | "assistant"; text: string; html?: string; summary?: string }
+interface Msg {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  html?: string;
+  summary?: string;
+  // When the AI asked the user to disambiguate, the answer comes back as a
+  // set of clickable options. clarifyKey is the resume token for /api/edit.
+  clarify?: { key: string; question: string; options: string[] };
+}
 interface SavedProject {
   appId: string;
   appName: string;
@@ -142,6 +151,9 @@ export default function BuilderPage() {
   const [secs, setSecs] = useState(0);
   const [progress, setProgress] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // If the previous assistant message asked a clarifying question, this is
+  // the resume token to attach to the next /api/edit call.
+  const [pendingClarifyKey, setPendingClarifyKey] = useState<string | null>(null);
   // Bump to refetch the usage badge after every AI round-trip.
   const [usageNonce, setUsageNonce] = useState(0);
   const [quotaExceeded, setQuotaExceeded] = useState<null | { used: number; quota: number; tier: string }>(null);
@@ -222,7 +234,12 @@ export default function BuilderPage() {
 
   useEffect(() => { bot.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, phase]);
 
-  const deploy = useCallback(async (h: string) => {
+  // The HTML last published to /apps/<id>. We compare to `html` to know if
+  // the user has edited since the last deploy — if so, the "Mở app" link
+  // would open a stale page, so we re-deploy first.
+  const [deployedHtml, setDeployedHtml] = useState("");
+
+  const deploy = useCallback(async (h: string): Promise<string | null> => {
     setDeploying(true);
     setError("");
     try {
@@ -234,12 +251,28 @@ export default function BuilderPage() {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Deploy thất bại");
       setUrl(d.url);
+      setDeployedHtml(h);
+      return d.url as string;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Lỗi deploy");
+      return null;
     } finally {
       setDeploying(false);
     }
   }, [appName]);
+
+  // Click handler for the combined Deploy / Open button: if the current
+  // HTML is newer than what's deployed (or nothing deployed yet), publish
+  // first, then open in a new tab. If already up-to-date, just open.
+  const deployOrOpen = useCallback(async () => {
+    if (!html) return;
+    if (url && html === deployedHtml) {
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
+    const fresh = await deploy(html);
+    if (fresh) window.open(fresh, "_blank", "noopener,noreferrer");
+  }, [html, url, deployedHtml, deploy]);
 
   const send = useCallback(async (overrideText?: string) => {
     const text = (overrideText ?? input).trim();
@@ -286,7 +319,16 @@ export default function BuilderPage() {
       const ep = isFirst ? "/api/chat" : "/api/edit";
       const bd = isFirst
         ? JSON.stringify({ messages: all.slice(0, -1), currentHtml: html, newMessage: text })
-        : JSON.stringify({ currentHtml: html, newMessage: text });
+        : JSON.stringify({
+            currentHtml: html,
+            newMessage: text,
+            // If this is the answer to a previous clarify question, attach the
+            // resume token so the server picks up the cached agent state
+            // instead of re-reading every file.
+            ...(pendingClarifyKey ? { clarifyKey: pendingClarifyKey } : {}),
+          });
+      // Single-use: consumed by THIS request whether it succeeds or fails.
+      if (pendingClarifyKey) setPendingClarifyKey(null);
       const r = await fetch(ep, { method: "POST", headers: { "Content-Type": "application/json" }, body: bd, signal: c.signal });
       if (!r.ok) {
         const d = await r.json().catch(() => null);
@@ -322,6 +364,12 @@ export default function BuilderPage() {
               try {
                 const st = decodeURIComponent(pl.slice(8));
                 setMsgs((p) => p.map((m) => (m.id === aid ? { ...m, summary: st } : m)));
+              } catch {}
+            } else if (pl.startsWith("clarify ")) {
+              try {
+                const data = JSON.parse(decodeURIComponent(pl.slice(8))) as { key: string; question: string; options: string[] };
+                setMsgs((p) => p.map((m) => (m.id === aid ? { ...m, summary: data.question, clarify: data } : m)));
+                setPendingClarifyKey(data.key);
               } catch {}
             } else if (pl === "reset") {
               // Server told us its previous output was wrong; drop everything
@@ -388,7 +436,7 @@ export default function BuilderPage() {
       // Re-pull usage now that the round-trip has completed (success or fail).
       setUsageNonce((n) => n + 1);
     }
-  }, [input, msgs, html, phase, t]);
+  }, [input, msgs, html, phase, t, pendingClarifyKey]);
 
   // Memoize the animated version so reopening a project or toggling
   // between iframes doesn't re-inject every render.
@@ -662,19 +710,25 @@ export default function BuilderPage() {
         <div className="flex items-center gap-2">
           <UsageBadge refreshKey={usageNonce} />
           <LangToggle />
-          {html && !deploying && (
-            <button onClick={() => deploy(html)}
-              className="rounded-full border border-[#e2e8f0] bg-white px-3 py-1.5 text-xs font-medium text-[#64748b] hover:text-[#7c3aed] hover:border-[#7c3aed]/30 transition-all">
-              {t.deploy}
-            </button>
-          )}
-          {url && !deploying && (
-            <a href={url} target="_blank" rel="noopener noreferrer"
-              className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 transition-all">
-              {t.openApp} &rarr;
-            </a>
-          )}
-          <Link href="/dashboard" className="text-xs text-[#64748b] hover:text-[#64748b] transition-colors">{t.myApps}</Link>
+          {html && (() => {
+            const stale = url && html !== deployedHtml;
+            const label = deploying ? t.buildDeploying : !url ? t.deploy : stale ? t.buildUpdateOpen : `${t.openApp} →`;
+            const tone = !url
+              ? "border-[#e2e8f0] bg-white text-[#64748b] hover:text-[#7c3aed] hover:border-[#7c3aed]/30"
+              : stale
+                ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100";
+            return (
+              <button
+                onClick={deployOrOpen}
+                disabled={deploying}
+                title={stale ? t.buildUpdateOpenHint : undefined}
+                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-wait ${tone}`}
+              >
+                {label}
+              </button>
+            );
+          })()}
           <button onClick={handleLogout} className="rounded-lg px-2.5 py-1.5 text-xs text-[#64748b] hover:text-[#64748b] hover:bg-[#f1f5f9] transition-all">{t.signout}</button>
         </div>
       </header>
@@ -747,7 +801,23 @@ export default function BuilderPage() {
                         <span className="text-[10px] text-[#a1a1aa] tabular-nums ml-1">{secs}s</span>
                       </div>
                     ) : (
-                      <p className="text-xs text-[#334155] leading-relaxed whitespace-pre-line">{summary}</p>
+                      <div>
+                        <p className="text-xs text-[#334155] leading-relaxed whitespace-pre-line">{summary}</p>
+                        {m.clarify && !busy && (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {m.clarify.options.map((opt) => (
+                              <button
+                                key={opt}
+                                type="button"
+                                onClick={() => send(opt)}
+                                className="text-[11px] leading-snug text-left rounded-lg border border-[#7c3aed]/30 bg-white hover:bg-[#7c3aed]/[0.05] hover:border-[#7c3aed]/50 text-[#5b21b6] px-2.5 py-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7c3aed]/30"
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                   {!isStreaming && !isEditing && (
