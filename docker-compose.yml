@@ -1,0 +1,32 @@
+# Deploy file used on the production server. Run with:
+#   docker compose pull && docker compose up -d
+#
+# Volumes:
+#   ./data         → SQLite database + legacy JSON
+#   ./public/apps  → deployed user HTML files
+# Both must persist across deploys; never bake them into the image.
+#
+# Env: copy .env.example → .env on the server and fill in real values.
+
+services:
+  justvibe:
+    # CI publishes images here; pin :latest or :sha-<commit> if you want
+    # explicit rollback control.
+    image: ghcr.io/tungtruong/nocode:latest
+    container_name: justvibe
+    restart: unless-stopped
+    ports:
+      # Bind to localhost only; nginx/caddy in front terminates TLS and
+      # proxies to this. Drop `127.0.0.1:` if exposing directly.
+      - "127.0.0.1:3000:3000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./public/apps:/app/public/apps
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/auth/me').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

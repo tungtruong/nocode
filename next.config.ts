@@ -30,6 +30,9 @@ const SECURITY_HEADERS = [
 ];
 
 const nextConfig: NextConfig = {
+  // Standalone output ships a self-contained `server.js` + minimal
+  // node_modules in .next/standalone — perfect for the Docker runner image.
+  output: "standalone",
   async headers() {
     return [
       {
