@@ -11,15 +11,16 @@ export const TIER_LIMITS: Record<Tier, number> = {
   team: 50_000_000,
 };
 
-// Hard cap per single request. Prevents one buggy prompt or a model that
-// loops on tool calls from burning the user's entire monthly quota at once.
-// Tuned so a normal multi-feature edit (10–12 turns × 15k tokens = ~180k)
-// fits comfortably for paid tiers, but free users hit it on runaway agents
-// (40k = 2–3 edits worth) before losing more than a day's allowance.
+// Hard cap per single request. Sized at ~75% of the monthly quota so a
+// legitimate multi-component edit ("add 3 tabs at the bottom" ≈ 150k tokens
+// observed) goes through, while a runaway loop is still bounded before it
+// can drain more than one user's worth of monthly budget. The point is to
+// catch obvious bugs (model emits a million-token reply or infinite tool
+// loop), not to force users to manually slice every feature.
 export const PER_REQUEST_LIMITS: Record<Tier, number> = {
-  free: 40_000,
-  pro: 200_000,
-  team: 500_000,
+  free: 150_000,
+  pro: 1_000_000,
+  team: 5_000_000,
 };
 
 // Per-request hard maxTurns (latency cap). Independent of token cap — protects

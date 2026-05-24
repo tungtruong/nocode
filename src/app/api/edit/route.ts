@@ -449,8 +449,8 @@ export async function POST(req: NextRequest) {
         // errors and silently breaks every button in the app.
         const hitTokenCap = totalTokens >= tokenBudget;
         const reason = hitTokenCap
-          ? `Yêu cầu vượt ngân sách ${tokenBudget.toLocaleString()} tokens cho một lần chỉnh sửa (đã dùng ${totalTokens.toLocaleString()}). App vẫn giữ như cũ và LẦN NÀY KHÔNG TÍNH QUOTA. Hãy tách thành các thay đổi nhỏ hơn.`
-          : "Yêu cầu phức tạp, AI chưa hoàn thành nên app vẫn giữ như cũ. LẦN NÀY KHÔNG TÍNH QUOTA. Hãy mô tả cụ thể hơn (ví dụ tách thành nhiều bước nhỏ) rồi thử lại.";
+          ? `Yêu cầu hơi lớn nên AI chưa hoàn thành kịp (đã dùng ${totalTokens.toLocaleString()} tokens). App vẫn giữ nguyên, lần này không tính vào quota của bạn. Bạn có thể thử lại với prompt cụ thể hơn hoặc nâng gói lên Pro để xử lý các thay đổi lớn.`
+          : "Yêu cầu hơi phức tạp, AI cần thêm bước. App vẫn giữ nguyên, lần này không tính vào quota. Thử lại với mô tả cụ thể hơn nhé.";
         sendProgress(`summary ${encodeURIComponent(reason)}`);
         sendProgress(`done ${toolCalls} tools ${totalTokens} tokens (refunded)`);
         // DELIBERATELY no recordUsage here: the user didn't get a working
