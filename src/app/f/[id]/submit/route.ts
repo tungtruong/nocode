@@ -80,6 +80,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (Object.keys(payload).length === 0) {
     return NextResponse.json({ error: "Form rỗng" }, { status: 400 });
   }
+  // Auto-inject timestamp so the owner can always sort by submission time —
+  // even if the form template doesn't capture it. Auto-create flow creates
+  // a `submitted_at` column to match this.
+  if (!payload.submitted_at) payload.submitted_at = new Date().toISOString();
 
   const source = getAppDataSource<SheetConfig>(appId, "sheet");
   let storedTo: "sheet" | "fallback" = "fallback";

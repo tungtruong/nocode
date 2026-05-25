@@ -180,8 +180,10 @@ function BindSheetPanel({ appId, onDone }: { appId: string; onDone: () => void }
   const [picked, setPicked] = useState("");
   const [sheetName, setSheetName] = useState("Sheet1");
   const [busy, setBusy] = useState(false);
+  const [autoBusy, setAutoBusy] = useState(false);
   const [err, setErr] = useState("");
   const [needsConnect, setNeedsConnect] = useState(false);
+  const [showManual, setShowManual] = useState(false);
 
   useEffect(() => {
     fetch("/api/sheet/list")
@@ -198,6 +200,28 @@ function BindSheetPanel({ appId, onDone }: { appId: string; onDone: () => void }
       .catch(() => setErr("Lỗi mạng"))
       .finally(() => setLoading(false));
   }, []);
+
+  // Auto-create the sheet: JV reads form fields from the HTML, creates a
+  // matching spreadsheet in the user's Drive, and binds it. The user
+  // doesn't have to know what "column header" means.
+  const autoCreate = async () => {
+    setAutoBusy(true);
+    setErr("");
+    try {
+      const r = await fetch("/api/sheet/auto-create-bind", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ appId }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Auto-create thất bại");
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Lỗi");
+    } finally {
+      setAutoBusy(false);
+    }
+  };
 
   const bind = async () => {
     if (!picked) return;
@@ -220,15 +244,15 @@ function BindSheetPanel({ appId, onDone }: { appId: string; onDone: () => void }
 
   return (
     <div className="mb-4 rounded-xl border border-[#e8e8ec] bg-white p-4">
-      <h3 className="font-semibold text-sm mb-1">Bind sheet cho app này</h3>
+      <h3 className="font-semibold text-sm mb-1">Kết nối sheet để nhận submission</h3>
       <p className="text-[11px] text-[#71717a] mb-3">
-        🔒 Sheet bạn chọn nằm trong Drive cá nhân — JustVibe chỉ append row qua Sheets API. Không copy data sang JV.
+        🔒 Sheet nằm trong Drive cá nhân của bạn — JustVibe chỉ relay API, không lưu data riêng.
       </p>
       {loading ? (
         <p className="text-xs text-[#94a3b8]">Đang tải...</p>
       ) : needsConnect ? (
         <div>
-          <p className="text-xs text-[#52525b] mb-3">Cần kết nối Google trước. Sheet bạn chọn sẽ thành nơi lưu submission.</p>
+          <p className="text-xs text-[#52525b] mb-3">Cần kết nối Google trước.</p>
           <a
             href={`/api/integrations/google/connect?returnTo=/dashboard/forms/${appId}`}
             className="inline-block rounded-lg bg-[#18181b] text-white text-xs px-4 py-2 hover:bg-[#27272a]"
@@ -237,36 +261,66 @@ function BindSheetPanel({ appId, onDone }: { appId: string; onDone: () => void }
           </a>
         </div>
       ) : (
-        <div className="space-y-2">
-          <select
-            value={picked}
-            onChange={(e) => setPicked(e.target.value)}
-            className="w-full rounded-lg border border-[#e8e8ec] bg-white px-3 py-2 text-xs"
-          >
-            <option value="">— chọn sheet (từ Drive của bạn) —</option>
-            {sheets.map((s) => (
-              <option key={s.spreadsheetId} value={s.spreadsheetId}>{s.title}</option>
-            ))}
-          </select>
-          <input
-            type="text"
-            value={sheetName}
-            onChange={(e) => setSheetName(e.target.value)}
-            placeholder="Tên tab (mặc định Sheet1)"
-            className="w-full rounded-lg border border-[#e8e8ec] bg-white px-3 py-2 text-xs"
-          />
-          <p className="text-[11px] text-[#94a3b8]">
-            💡 Sheet cần có header ở dòng 1 (tên cột) để form auto-map theo <code>name=</code> của input.
-          </p>
-          <div className="flex gap-2">
+        <div className="space-y-3">
+          {/* Primary CTA: auto-create. The 99% path — JV reads the form's
+              <input name=...> attrs out of the deployed HTML, creates a
+              matching spreadsheet in the user's Drive, binds it. User
+              doesn't need to know what a "column header" is. */}
+          <div className="rounded-xl border-2 border-[#7c3aed]/30 bg-gradient-to-br from-[#7c3aed]/[0.04] to-[#a855f7]/[0.04] p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-base">✨</span>
+              <h4 className="text-sm font-semibold text-[#18181b]">Tạo sheet tự động (đề xuất)</h4>
+            </div>
+            <p className="text-[11px] text-[#52525b] mb-3 leading-relaxed">
+              JustVibe đọc form trong app → tạo Google Sheet mới trong Drive của bạn với cột khớp đúng từng input. Không cần biết kỹ thuật.
+            </p>
             <button
-              onClick={bind}
-              disabled={busy || !picked}
-              className="rounded-lg bg-[#18181b] text-white text-xs px-4 py-2 disabled:opacity-50 hover:bg-[#27272a]"
+              onClick={autoCreate}
+              disabled={autoBusy}
+              className="w-full rounded-lg bg-[#7c3aed] text-white text-sm font-medium py-2.5 disabled:opacity-50 hover:bg-[#6d28d9]"
             >
-              {busy ? "Đang bind..." : "Bind"}
+              {autoBusy ? "Đang tạo sheet..." : "✨ Tạo sheet & bind tự động"}
             </button>
           </div>
+
+          <button
+            onClick={() => setShowManual((p) => !p)}
+            className="w-full text-[11px] text-[#94a3b8] hover:text-[#52525b] py-1"
+          >
+            {showManual ? "↑ Ẩn" : "↓"} Hoặc chọn sheet đã có sẵn (thủ công)
+          </button>
+
+          {showManual && (
+            <div className="space-y-2 border-t border-[#f1f5f9] pt-3">
+              <select
+                value={picked}
+                onChange={(e) => setPicked(e.target.value)}
+                className="w-full rounded-lg border border-[#e8e8ec] bg-white px-3 py-2 text-xs"
+              >
+                <option value="">— chọn sheet —</option>
+                {sheets.map((s) => (
+                  <option key={s.spreadsheetId} value={s.spreadsheetId}>{s.title}</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                value={sheetName}
+                onChange={(e) => setSheetName(e.target.value)}
+                placeholder="Tên tab (Sheet1)"
+                className="w-full rounded-lg border border-[#e8e8ec] bg-white px-3 py-2 text-xs"
+              />
+              <p className="text-[11px] text-[#94a3b8]">
+                Sheet phải có header ở dòng 1 (tên cột) khớp với <code>name=</code> của input form.
+              </p>
+              <button
+                onClick={bind}
+                disabled={busy || !picked}
+                className="w-full rounded-lg bg-[#18181b] text-white text-xs px-4 py-2 disabled:opacity-50 hover:bg-[#27272a]"
+              >
+                {busy ? "Đang bind..." : "Bind sheet đã chọn"}
+              </button>
+            </div>
+          )}
           {err && <p className="text-xs text-red-600">{err}</p>}
         </div>
       )}
