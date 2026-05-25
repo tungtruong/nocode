@@ -170,44 +170,24 @@ export default function DashboardPage() {
             <p className="text-sm text-[#71717a]">{t.dashDesc}</p>
           </div>
           <div className="flex items-center gap-2">
-            <Link
-              href="/dashboard/integrations"
-              title={googleConnected ? "Google Sheets đã kết nối — click để quản lý" : "Kết nối Google Sheets"}
-              className={`text-xs rounded-lg px-3 py-1.5 font-medium transition-colors border ${
-                googleConnected
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                  : "border-[#e8e8ec] bg-white text-[#52525b] hover:text-[#18181b] hover:bg-[#fafafa]"
-              }`}
-            >
-              {googleConnected ? "✓ Sheets" : "🔌 Kết nối"}
-            </Link>
+            {/* Only show after connection — lazy pattern. Disconnected users
+                discover Google integration via the form auto-create flow, not
+                via header CTAs cluttering the dashboard. */}
+            {googleConnected && (
+              <Link
+                href="/dashboard/integrations"
+                title="Google Sheets đã kết nối — click để quản lý"
+                className="text-xs rounded-lg px-3 py-1.5 font-medium border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
+              >
+                ✓ Sheets
+              </Link>
+            )}
             <button onClick={() => setRedeemOpen(true)} className="text-xs rounded-lg border border-[#7c3aed]/20 bg-[#7c3aed]/[0.04] px-3 py-1.5 text-[#7c3aed] hover:bg-[#7c3aed]/[0.08] transition-colors">{t.dashRedeem}</button>
             <button onClick={handleLogout} className="text-xs text-[#64748b] hover:text-[#64748b] transition-colors">{t.signout}</button>
           </div>
         </div>
 
         <ReferralWidget />
-
-        {/* First-run nudge — generated apps don't actually persist any form
-            data until the owner connects Google Sheets. Big visible CTA is
-            the right hammer for the right nail. */}
-        {googleConnected === false && (
-          <div className="mt-4 rounded-2xl border border-[#7c3aed]/25 bg-gradient-to-br from-[#7c3aed]/[0.04] to-[#a855f7]/[0.04] p-5 flex items-start gap-4">
-            <div className="text-2xl shrink-0">📊</div>
-            <div className="flex-1 min-w-0">
-              <h3 className="font-semibold text-[#18181b] mb-0.5">Kết nối Google Sheets để nhận data từ form</h3>
-              <p className="text-xs text-[#52525b] leading-relaxed">
-                App của bạn có form (đăng ký, RSVP, đặt lịch...) — submission sẽ ghi thẳng vào Sheet trong Drive cá nhân của bạn. Không kết nối → data lưu tạm trong JustVibe (mất sau 30 ngày).
-              </p>
-            </div>
-            <Link
-              href="/dashboard/integrations"
-              className="shrink-0 rounded-xl bg-[#7c3aed] text-white text-sm font-medium px-5 py-2.5 hover:bg-[#6d28d9] whitespace-nowrap"
-            >
-              Kết nối ngay →
-            </Link>
-          </div>
-        )}
 
         {topupBanner && (
           <div className={`mt-4 rounded-xl px-4 py-2.5 text-xs ${

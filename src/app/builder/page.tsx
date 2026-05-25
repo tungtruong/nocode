@@ -670,23 +670,19 @@ export default function BuilderPage() {
             <span className="text-base font-bold tracking-tight text-[#0f172a]">JustVibe</span>
           </Link>
           <div className="flex items-center gap-2">
-            <Link
-              href="/dashboard/integrations"
-              title={
-                googleConnected === null
-                  ? "Đang kiểm tra kết nối..."
-                  : googleConnected
-                    ? "Google Sheets đã kết nối — click để quản lý"
-                    : "Kết nối Google Sheets để form lưu data"
-              }
-              className={`hidden sm:inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
-                googleConnected
-                  ? "text-emerald-700 bg-emerald-50 hover:bg-emerald-100 ring-1 ring-emerald-200"
-                  : "text-[#52525b] hover:text-[#18181b] hover:bg-[#f1f5f9]"
-              }`}
-            >
-              {googleConnected ? "✓ Sheets" : "🔌 Kết nối"}
-            </Link>
+            {/* Only surface the connection chip when ALREADY connected — for
+                quick visual confirmation. When disconnected, no nag here;
+                the post-deploy toast handles the "you have a form, connect
+                now" prompt at the right moment (lazy connect pattern). */}
+            {googleConnected && (
+              <Link
+                href="/dashboard/integrations"
+                title="Google Sheets đã kết nối — click để quản lý"
+                className="hidden sm:inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 ring-1 ring-emerald-200 transition-all"
+              >
+                ✓ Sheets
+              </Link>
+            )}
             <UsageBadge refreshKey={usageNonce} />
             <LangToggle />
             <button onClick={handleLogout} className="rounded-lg px-2.5 py-1.5 text-xs text-[#64748b] hover:text-[#64748b] hover:bg-[#f1f5f9] transition-all">{t.signout}</button>

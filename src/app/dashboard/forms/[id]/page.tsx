@@ -204,7 +204,19 @@ function BindSheetPanel({ appId, onDone }: { appId: string; onDone: () => void }
   // Auto-create the sheet: JV reads form fields from the HTML, creates a
   // matching spreadsheet in the user's Drive, and binds it. The user
   // doesn't have to know what "column header" means.
+  //
+  // Lazy-connect: if Google isn't connected yet, redirect to the OAuth
+  // flow and come back to this page with `?autocreate=1` — the page-level
+  // effect (see below) re-fires this function automatically post-grant.
   const autoCreate = async () => {
+    if (needsConnect) {
+      window.location.assign(
+        `/api/integrations/google/connect?returnTo=${encodeURIComponent(
+          `/dashboard/forms/${appId}?autocreate=1`,
+        )}`,
+      );
+      return;
+    }
     setAutoBusy(true);
     setErr("");
     try {
@@ -222,6 +234,20 @@ function BindSheetPanel({ appId, onDone }: { appId: string; onDone: () => void }
       setAutoBusy(false);
     }
   };
+
+  // After OAuth round-trip, if the URL flag says "autocreate", fire it.
+  // queueMicrotask defers the state-bearing autoCreate() out of the effect
+  // body to satisfy react-hooks/set-state-in-effect.
+  useEffect(() => {
+    if (loading || needsConnect) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("autocreate") !== "1") return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("autocreate");
+    window.history.replaceState(null, "", url.toString());
+    queueMicrotask(() => { autoCreate(); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, needsConnect]);
 
   const bind = async () => {
     if (!picked) return;
@@ -250,47 +276,50 @@ function BindSheetPanel({ appId, onDone }: { appId: string; onDone: () => void }
       </p>
       {loading ? (
         <p className="text-xs text-[#94a3b8]">Đang tải...</p>
-      ) : needsConnect ? (
-        <div>
-          <p className="text-xs text-[#52525b] mb-3">Cần kết nối Google trước.</p>
-          <a
-            href={`/api/integrations/google/connect?returnTo=/dashboard/forms/${appId}`}
-            className="inline-block rounded-lg bg-[#18181b] text-white text-xs px-4 py-2 hover:bg-[#27272a]"
-          >
-            Kết nối Google →
-          </a>
-        </div>
       ) : (
         <div className="space-y-3">
           {/* Primary CTA: auto-create. The 99% path — JV reads the form's
               <input name=...> attrs out of the deployed HTML, creates a
-              matching spreadsheet in the user's Drive, binds it. User
-              doesn't need to know what a "column header" is. */}
+              matching spreadsheet in the user's Drive, binds it. If user
+              hasn't connected Google yet, clicking this kicks off OAuth
+              first then resumes auto-create — they only see ONE button. */}
           <div className="rounded-xl border-2 border-[#7c3aed]/30 bg-gradient-to-br from-[#7c3aed]/[0.04] to-[#a855f7]/[0.04] p-4">
             <div className="flex items-center gap-2 mb-2">
               <span className="text-base">✨</span>
-              <h4 className="text-sm font-semibold text-[#18181b]">Tạo sheet tự động (đề xuất)</h4>
+              <h4 className="text-sm font-semibold text-[#18181b]">
+                {needsConnect ? "Kết nối Google + tạo sheet tự động" : "Tạo sheet tự động"}
+              </h4>
             </div>
             <p className="text-[11px] text-[#52525b] mb-3 leading-relaxed">
-              JustVibe đọc form trong app → tạo Google Sheet mới trong Drive của bạn với cột khớp đúng từng input. Không cần biết kỹ thuật.
+              {needsConnect
+                ? "Lần đầu cần grant quyền Google (1 click). Sau đó JustVibe tự tạo Google Sheet trong Drive của bạn, cột khớp đúng từng input form."
+                : "JustVibe đọc form trong app → tạo Google Sheet mới trong Drive của bạn với cột khớp đúng từng input."}
             </p>
             <button
               onClick={autoCreate}
               disabled={autoBusy}
               className="w-full rounded-lg bg-[#7c3aed] text-white text-sm font-medium py-2.5 disabled:opacity-50 hover:bg-[#6d28d9]"
             >
-              {autoBusy ? "Đang tạo sheet..." : "✨ Tạo sheet & bind tự động"}
+              {autoBusy
+                ? "Đang tạo sheet..."
+                : needsConnect
+                  ? "Kết nối Google & tạo sheet →"
+                  : "✨ Tạo sheet & bind tự động"}
             </button>
           </div>
 
-          <button
-            onClick={() => setShowManual((p) => !p)}
-            className="w-full text-[11px] text-[#94a3b8] hover:text-[#52525b] py-1"
-          >
-            {showManual ? "↑ Ẩn" : "↓"} Hoặc chọn sheet đã có sẵn (thủ công)
-          </button>
+          {/* Manual fallback only shown once Google's already connected —
+              otherwise the picker is empty and confusing. */}
+          {!needsConnect && (
+            <button
+              onClick={() => setShowManual((p) => !p)}
+              className="w-full text-[11px] text-[#94a3b8] hover:text-[#52525b] py-1"
+            >
+              {showManual ? "↑ Ẩn" : "↓"} Hoặc chọn sheet đã có sẵn (thủ công)
+            </button>
+          )}
 
-          {showManual && (
+          {!needsConnect && showManual && (
             <div className="space-y-2 border-t border-[#f1f5f9] pt-3">
               <select
                 value={picked}
