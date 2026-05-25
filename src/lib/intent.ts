@@ -42,6 +42,17 @@ function keywordScores(message: string): Map<ModeId, number> {
   return scores;
 }
 
+/**
+ * Pure keyword-matching mode picker. Returns the mode if the user prompt
+ * has ≥2 keyword hits in a single mode AND strictly beats every other
+ * mode's score. Returns null when the prompt is ambiguous.
+ * Exported so the orchestrator can use it as a fast-path before falling
+ * back to the LLM call.
+ */
+export function keywordPickMode(message: string): ModeId | null {
+  return bestByKeyword(keywordScores(message.trim()));
+}
+
 function bestByKeyword(scores: Map<ModeId, number>): ModeId | null {
   let best: ModeId | null = null;
   let bestScore = 0;

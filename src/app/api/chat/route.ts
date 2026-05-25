@@ -7,7 +7,7 @@ import { APP_MODES, modeOf, type ModeId } from "@/lib/modes";
 import { logTemplateUsage } from "@/lib/store";
 import { substitutePlaceholders } from "@/lib/html-substitute";
 import { joinDocs, type CapabilityName } from "@/lib/jv-capabilities";
-import { classifyCapabilities } from "@/lib/capability-classifier";
+import { planApp, type AppPlan } from "@/lib/orchestrator";
 
 // Base prompt for "new app" generation. The DATA / AUTH / FORMS capability
 // sections used to live inline here, but they cost ~1k prompt tokens on EVERY
@@ -240,18 +240,29 @@ export async function POST(req: NextRequest) {
           //     template skeleton in the user message; tighter token budget
           //     since the model only fills placeholders, not the whole doc.
           const usingTemplate = !!modeDef.template;
-          // Niche templates (qr_menu/wedding/...) have known capability needs
-          // baked in — e.g. qr_menu always needs forms + db. The classifier is
-          // only useful for the generic "web_app" mode where the user's free
-          // prompt determines what's needed.
+          // One unified orchestrator call replaces the previous two-step
+          // (intent + capability classifier) flow. For niche templates the
+          // capabilities are pre-declared in modes.ts so we still skip the
+          // LLM and just read them — keeping cost flat for the common path.
           let chosenCaps: CapabilityName[] = [];
+          let plan: AppPlan | null = null;
           if (usingTemplate) {
             chosenCaps = modeDef.capabilities ?? [];
           } else {
-            sendProgress("progress classifying");
-            const pick = await classifyCapabilities(newMessage, session.email);
-            chosenCaps = pick.caps;
-            console.log(`[Chat] caps=${JSON.stringify(chosenCaps)} src=${pick.source}`);
+            sendProgress("progress planning");
+            plan = await planApp(newMessage, session.email);
+            chosenCaps = plan.caps;
+            // Stream the plan to the client BEFORE generation starts so the UI
+            // can render a "Sẽ tạo: X + Y + Z" banner while the model warms up.
+            // Out-of-band progress marker — the client filters \x1E lines.
+            const slimPlan = {
+              mode: plan.mode,
+              caps: plan.caps,
+              suggestions: plan.suggestions,
+              source: plan.source,
+            };
+            sendProgress(`plan ${encodeURIComponent(JSON.stringify(slimPlan))}`);
+            console.log(`[Chat] caps=${JSON.stringify(chosenCaps)} src=${plan.source} sug=${plan.suggestions.length}`);
           }
           const systemPrompt = usingTemplate
             ? `${TEMPLATE_FILL_PROMPT}\n\n${modeDef.systemHints}${chosenCaps.length ? `\n\n${joinDocs(chosenCaps)}` : ""}`

@@ -193,6 +193,16 @@ export default function BuilderPage() {
   const [deploying, setDeploying] = useState(false);
   const [secs, setSecs] = useState(0);
   const [progress, setProgress] = useState("");
+  // Orchestrator plan sent by /api/chat before generation starts — used to
+  // render the "Sẽ tạo X + Y + Z" banner while the model warms up, and to
+  // surface AI's proactive suggestions ("Bạn có muốn thêm Realtime?") as
+  // one-click chips after the gen completes.
+  const [lastPlan, setLastPlan] = useState<{
+    mode: string;
+    caps: string[];
+    suggestions: Array<{ cap: string; reason: string }>;
+    source: string;
+  } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   // If the previous assistant message asked a clarifying question, this is
   // the resume token to attach to the next /api/edit call.
@@ -337,7 +347,7 @@ export default function BuilderPage() {
     const c = new AbortController();
     abort.current = c;
     if (overrideText === undefined) setInput("");
-    setError(""); setSecs(0); setProgress("");
+    setError(""); setSecs(0); setProgress(""); setLastPlan(null);
     setMobileTab("preview");
 
     const um: Msg = { id: Date.now().toString(), role: "user", text };
@@ -493,8 +503,20 @@ export default function BuilderPage() {
                 stepKey === "correcting" ? t.buildCorrecting :
                 stepKey === "summarizing" ? t.buildSummarizing :
                 stepKey === "fallback" ? t.buildFallback :
+                stepKey === "planning" ? "Đang lên kế hoạch..." :
                 stepKey === "done" ? t.buildDone : stepKey;
               setProgress(label);
+            } else if (pl.startsWith("plan ")) {
+              // Orchestrator returned mode + caps + suggestions BEFORE the
+              // generator started — stash it so the UI can render a banner.
+              try {
+                const planJson = JSON.parse(decodeURIComponent(pl.slice(5))) as {
+                  mode: string; caps: string[];
+                  suggestions: Array<{ cap: string; reason: string }>;
+                  source: string;
+                };
+                setLastPlan(planJson);
+              } catch { /* malformed plan — silently drop */ }
             } else if (pl === "hb") {
               // Server keepalive — silent. Don't update progress.
             } else if (pl) {
@@ -996,16 +1018,28 @@ export default function BuilderPage() {
                         />
                       ) : m.text
                     ) : (isLast && busy) ? (
-                      <div className="flex items-center gap-2 text-xs">
-                        <span className="flex h-2 w-2 rounded-full bg-[#7c3aed] animate-pulse" />
-                        <span className="text-[#64748b] font-medium truncate">
-                          {progress || (phase === "thinking" ? t.buildThinking : t.buildBuilding)}
-                        </span>
-                        <span className="text-[10px] text-[#a1a1aa] tabular-nums ml-1">{secs}s</span>
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="flex h-2 w-2 rounded-full bg-[#7c3aed] animate-pulse" />
+                          <span className="text-[#64748b] font-medium truncate">
+                            {progress || (phase === "thinking" ? t.buildThinking : t.buildBuilding)}
+                          </span>
+                          <span className="text-[10px] text-[#a1a1aa] tabular-nums ml-1">{secs}s</span>
+                        </div>
+                        {isLast && lastPlan && (
+                          <PlanBanner plan={lastPlan} />
+                        )}
                       </div>
                     ) : (
                       <div>
                         <p className="text-xs text-[#334155] leading-relaxed whitespace-pre-line">{summary}</p>
+                        {isLast && !busy && lastPlan && lastPlan.suggestions.length > 0 && (
+                          <PlanSuggestions
+                            plan={lastPlan}
+                            onAccept={(sug) => send(`Thêm tính năng ${sug.cap}: ${sug.reason}`)}
+                            onDismiss={() => setLastPlan({ ...lastPlan, suggestions: [] })}
+                          />
+                        )}
                         {m.clarify && !busy && (
                           <div className="mt-2 flex flex-wrap gap-1.5">
                             {m.clarify.options.map((opt) => (
@@ -1407,6 +1441,63 @@ function FlagTemplateModal(props: {
             {props.t.templateFlagSubmit}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// === Plan UI bits ===
+// One-line label for each capability shown in the plan banner. Keep VN-first.
+const CAP_LABEL: Record<string, string> = {
+  forms:    "Form",
+  db:       "Dữ liệu",
+  auth:     "Đăng nhập",
+  files:    "Upload ảnh",
+  realtime: "Realtime",
+  payment:  "Thanh toán",
+};
+
+function PlanBanner({ plan }: { plan: { mode: string; caps: string[] } }) {
+  if (plan.caps.length === 0) return null;
+  return (
+    <div className="rounded-lg bg-[#f5f3ff] border border-[#e9d5ff] px-2.5 py-1.5 text-[11px] text-[#5b21b6] flex flex-wrap items-center gap-1.5">
+      <span className="font-medium">Sẽ tạo:</span>
+      {plan.caps.map((c) => (
+        <span key={c} className="inline-flex items-center gap-1 rounded-md bg-white border border-[#e9d5ff] px-1.5 py-0.5">
+          {CAP_LABEL[c] || c}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function PlanSuggestions({
+  plan,
+  onAccept,
+  onDismiss,
+}: {
+  plan: { suggestions: Array<{ cap: string; reason: string }> };
+  onAccept: (sug: { cap: string; reason: string }) => void;
+  onDismiss: () => void;
+}) {
+  if (plan.suggestions.length === 0) return null;
+  return (
+    <div className="mt-3 rounded-lg border border-[#e9d5ff] bg-[#faf5ff] px-2.5 py-2">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[11px] font-semibold text-[#5b21b6]">💡 Gợi ý nâng cấp</span>
+        <button onClick={onDismiss} className="text-[10px] text-[#a1a1aa] hover:text-[#71717a]">Bỏ qua</button>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {plan.suggestions.map((s, i) => (
+          <button
+            key={i}
+            onClick={() => onAccept(s)}
+            className="text-left text-[11px] leading-snug rounded-md border border-[#e9d5ff] bg-white hover:bg-[#f5f3ff] px-2 py-1.5"
+          >
+            <span className="font-medium text-[#5b21b6]">+ {CAP_LABEL[s.cap] || s.cap}</span>
+            <span className="text-[#52525b]"> · {s.reason}</span>
+          </button>
+        ))}
       </div>
     </div>
   );
