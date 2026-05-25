@@ -41,8 +41,7 @@ export default function PricingPage() {
       desc: t.planProDesc,
       features: features.planProFeatures as readonly string[],
       cta: t.planProCTA,
-      highlight: true,
-      badge: lang === "vi" ? "Phổ biến nhất" : "Most popular",
+      highlight: false,
     },
     {
       tier: "team",
@@ -51,7 +50,10 @@ export default function PricingPage() {
       desc: t.planTeamDesc,
       features: features.planTeamFeatures as readonly string[],
       cta: t.planTeamCTA,
-      highlight: false,
+      highlight: true,
+      // Anchor the value-ladder story: Max is what we want users to upgrade
+      // INTO from Pro, not just an enterprise upsell from Free.
+      badge: lang === "vi" ? "Giá trị tốt nhất" : "Best value",
     },
   ];
 
@@ -60,6 +62,7 @@ export default function PricingPage() {
     [t.pricingFAQ2Q, t.pricingFAQ2A],
     [t.pricingFAQ3Q, t.pricingFAQ3A],
     [t.pricingFAQ4Q, t.pricingFAQ4A],
+    [t.pricingFAQ5Q, t.pricingFAQ5A],
   ];
 
   const handleUpgrade = async (tier: PlanTier) => {
@@ -110,7 +113,11 @@ export default function PricingPage() {
           <div className="mt-6 mx-auto max-w-md rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-600">{err}</div>
         )}
 
-        <div className="mt-10 grid gap-5 sm:grid-cols-3 text-left">
+        <div className="mt-6 mx-auto max-w-xl rounded-full bg-gradient-to-r from-[#7c3aed]/10 to-[#a855f7]/10 px-5 py-2 text-xs font-medium text-[#7c3aed]">
+          🎁 {t.pricingValueHighlight}
+        </div>
+
+        <div className="mt-8 grid gap-5 sm:grid-cols-3 text-left">
           {PLANS.map((plan) => {
             const busy = busyTier === plan.tier;
             return (

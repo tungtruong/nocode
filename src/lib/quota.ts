@@ -52,46 +52,49 @@ export function weightedTokens(promptTokens: number, completionTokens: number, c
   );
 }
 
+// Free is intentionally tight — just enough to try the product on 1 small app.
+// Pro is the workhorse tier. Max gives 5.45× tokens for 3.25× price (1.68×
+// better $/token) so users on Pro who hit the cap see a clear value ladder up.
+//
+// NOTE: the tier identifier "team" is kept in the DB + PayPal plan mapping
+// to avoid invalidating existing subscriptions; UI labels it as "Max".
 export const TIER_LIMITS: Record<Tier, number> = {
-  free: 1_000_000,
+  free: 300_000,
   pro: 11_000_000,
-  team: 36_000_000,
+  team: 60_000_000,
 };
 
-// Hard cap per single request (weighted tokens). Sized at ~50% of the monthly
-// quota so a legitimate multi-component edit ("add 3 tabs at the bottom"
-// ≈ 150k weighted tokens observed) goes through with room to spare, while a
-// runaway loop or pathological prompt is bounded before it can drain more
-// than half a month's budget.
+// Hard cap per single request (weighted tokens). Sized so a legitimate
+// multi-component edit goes through with room to spare, while a runaway loop
+// is bounded before it eats meaningful quota.
 export const PER_REQUEST_LIMITS: Record<Tier, number> = {
-  free: 500_000,
+  free: 100_000,
   pro: 5_500_000,
-  team: 18_000_000,
+  team: 25_000_000,
 };
 
 // Per-request hard maxTurns (latency cap). Independent of token cap — protects
 // against models that emit zero-token tool loops.
 export const MAX_TURNS_PER_TIER: Record<Tier, number> = {
-  free: 12,
+  free: 8,
   pro: 16,
-  team: 20,
+  team: 22,
 };
 
 // How many in-progress projects (chat history rows) a user can keep, and how
-// many deployed apps (subdomain-claiming rows) they can own. Free is kept tight
-// to discourage slug-squatting; Team has no draft cap so a studio juggling many
-// client projects isn't blocked. Counts include archived rows — caller can
-// drop archived from the count once we implement archive.
+// many deployed apps (subdomain-claiming rows) they can own. Free is kept
+// extra tight (1 each) so it really is a trial, not a workspace. Max has no
+// draft cap so a studio juggling many client projects isn't blocked.
 export const PROJECT_LIMITS: Record<Tier, number> = {
-  free: 3,
+  free: 1,
   pro: 30,
   team: Number.MAX_SAFE_INTEGER,
 };
 
 export const DEPLOY_LIMITS: Record<Tier, number> = {
-  free: 2,
+  free: 1,
   pro: 20,
-  team: 100,
+  team: 200,
 };
 
 export function projectLimit(email: string): number {
@@ -107,7 +110,7 @@ export function deployLimit(email: string): number {
 export const TIER_LABELS: Record<Tier, string> = {
   free: "Miễn phí",
   pro: "Pro",
-  team: "Team",
+  team: "Max",
 };
 
 // Period key. UTC month so the rollover is the same for every user regardless
