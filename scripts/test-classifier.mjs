@@ -42,6 +42,12 @@ const CASES = [
   ["Menu cafe có ảnh thật của từng món", ["db", "files"]],
   ["Journal app, user upload ảnh đính kèm note", ["db", "auth", "files"]],
   ["CV portfolio với upload avatar thật", ["files"]],
+
+  // realtime capability
+  ["Live chat room cho cộng đồng", ["db", "realtime"]],
+  ["Kitchen display system — nhà bếp xem đơn mới real-time", ["db", "realtime"]],
+  ["Poll voting có counter cập nhật trực tiếp khi vote", ["db", "realtime"]],
+  ["Multiplayer typing game", ["db", "realtime"]],
 ];
 
 let pass = 0;

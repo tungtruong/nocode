@@ -14,9 +14,9 @@
 //   3. Add the name to CAPABILITY_NAMES.
 //   4. Update the classifier's prompt + schema in capability-classifier.ts.
 
-export type CapabilityName = "forms" | "db" | "auth" | "files";
+export type CapabilityName = "forms" | "db" | "auth" | "files" | "realtime";
 
-export const CAPABILITY_NAMES: readonly CapabilityName[] = ["forms", "db", "auth", "files"] as const;
+export const CAPABILITY_NAMES: readonly CapabilityName[] = ["forms", "db", "auth", "files", "realtime"] as const;
 
 export interface Capability {
   name: CapabilityName;
@@ -182,11 +182,67 @@ DO NOT:
   owner's — visitors can ONLY upload, not delete (that's dashboard-only).`,
 };
 
+const REALTIME: Capability = {
+  name: "realtime",
+  summary: "`realtime` — live subscribe to jv.db changes via window.jv.realtime.subscribe (chat, live counters, live orders, multiplayer).",
+  docs: `## REALTIME — \`window.jv.realtime\` (live data updates)
+Use when the app needs to react INSTANTLY to data changes — chat / comments,
+live order tickets, voting / poll counters, multi-user collab, live event
+attendee count. Skip for static lists where polling on user action is fine.
+
+API:
+  const sub = jv.realtime.subscribe(table, (event) => {
+    // event.type ∈ 'INSERT' | 'UPDATE' | 'DELETE'
+    // event.row     — row_data of the affected row (or null on DELETE)
+    // event.oldRow  — previous row_data on UPDATE/DELETE (null on INSERT)
+    // event.id      — Supabase row UUID
+  });
+  // Later:
+  sub.close();
+
+Per-user scoped subscriptions (only fires for the signed-in user's own rows):
+  const sub = jv.realtime.subscribe('notes', handler, { user: '@me' });
+  // Requires jv.auth — call jv.auth.user() first.
+
+Pattern — render+subscribe (initial fetch, then live updates):
+  const grid = document.getElementById('grid');
+  const items = new Map();
+  function render(){
+    grid.innerHTML = [...items.values()]
+      .sort((a,b) => b._createdAt.localeCompare(a._createdAt))
+      .map(r => \`<article>\${r.name}</article>\`).join('') || '<p>Chưa có</p>';
+  }
+
+  // 1) initial load
+  for (const r of await jv.db.list('messages', { limit: 50 })) items.set(r._id, r);
+  render();
+
+  // 2) live tail
+  const sub = jv.realtime.subscribe('messages', (e) => {
+    if (e.type === 'INSERT' || e.type === 'UPDATE') items.set(e.id, { ...e.row, _id: e.id, _createdAt: new Date().toISOString() });
+    if (e.type === 'DELETE') items.delete(e.id);
+    render();
+  });
+
+Rules:
+- Always do an initial \`jv.db.list\` before subscribing, otherwise the UI is
+  empty until the first event arrives.
+- Always call \`sub.close()\` on page unload to free server FDs:
+    window.addEventListener('beforeunload', () => sub.close());
+- ONE subscribe per (table, scope) — don't open the same subscription twice
+  for the same view.
+- Max 5 concurrent subscriptions per IP per app (server-enforced).
+- Submissions / _jv_users tables are NOT subscribable (private).
+- Heartbeats every 25s are sent as SSE comments and never reach the handler —
+  no need to filter them out yourself.`,
+};
+
 const REGISTRY: Record<CapabilityName, Capability> = {
   forms: FORMS,
   db: DB,
   auth: AUTH,
   files: FILES,
+  realtime: REALTIME,
 };
 
 export function getCapability(name: CapabilityName): Capability {

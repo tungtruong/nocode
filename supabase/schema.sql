@@ -43,3 +43,25 @@ create trigger app_rows_touch
 
 -- Sanity check: should return 0 rows on a fresh DB.
 -- select count(*) from public.app_rows;
+
+-- =========================================================================
+-- Realtime: enable Postgres change broadcasting on app_rows so the JustVibe
+-- server can subscribe (via service_role) and fan out INSERT/UPDATE/DELETE
+-- events to connected end-user apps over SSE.
+--
+-- Safe to re-run: the publication ALTER is idempotent in newer PG; on
+-- older versions it errors if already added — wrap in DO block to swallow.
+-- =========================================================================
+do $$
+begin
+  begin
+    alter publication supabase_realtime add table public.app_rows;
+  exception
+    when duplicate_object then
+      null; -- already in publication, no-op
+  end;
+end$$;
+
+-- Replica identity FULL so UPDATE/DELETE events include the old row data
+-- (needed for clients that want to remove a row from their UI by id).
+alter table public.app_rows replica identity full;
