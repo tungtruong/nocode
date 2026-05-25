@@ -420,6 +420,13 @@ export const APP_MODES: Record<ModeId, ModeDef> = {
     systemHints: "",
     keywords: ["app", "tool", "calculator", "todo", "tracker", "công cụ", "ứng dụng", "máy tính"],
   },
+  // Per-mode capabilities are now MAXIMALLY INCLUSIVE within reason: each
+  // template gets every cap it could plausibly use, even if the user didn't
+  // explicitly ask. User preference: "cần gì là cho hết luôn đỡ phải hỏi" —
+  // don't make the AI pick a subset, just give templates everything the niche
+  // typically wants. Trade-off is +500-1500 prompt tokens per template gen;
+  // upside is the gen always has the right helper available so users don't
+  // hit "AI didn't include X" mid-edit.
   qr_menu: {
     id: "qr_menu",
     emoji: "🍽",
@@ -428,8 +435,9 @@ export const APP_MODES: Record<ModeId, ModeDef> = {
     systemHints: HINTS_QR_MENU,
     template: TEMPLATE_QR_MENU,
     keywords: ["menu", "thực đơn", "quán", "cafe", "cà phê", "nhà hàng", "restaurant", "đồ ăn", "đồ uống", "F&B", "trà sữa"],
-    // menu items live in jv.db so owner can edit prices; order form goes to /f/<id>/submit.
-    capabilities: ["forms", "db"],
+    // Menu items + prices in jv.db; order/booking form; real food photos
+    // uploaded by owner; QR pay for table deposit / online order.
+    capabilities: ["forms", "db", "files", "payment"],
   },
   wedding: {
     id: "wedding",
@@ -439,8 +447,8 @@ export const APP_MODES: Record<ModeId, ModeDef> = {
     systemHints: HINTS_WEDDING,
     template: TEMPLATE_WEDDING,
     keywords: ["cưới", "thiệp cưới", "thiệp mời", "đám cưới", "lễ cưới", "wedding", "vu quy", "tân hôn", "mời cưới"],
-    // RSVP form to /f/<id>/submit; no db (static invite).
-    capabilities: ["forms"],
+    // RSVP form, couple/family photo gallery, mừng cưới QR.
+    capabilities: ["forms", "files", "payment"],
   },
   landing: {
     id: "landing",
@@ -450,8 +458,8 @@ export const APP_MODES: Record<ModeId, ModeDef> = {
     systemHints: HINTS_LANDING,
     template: TEMPLATE_LANDING,
     keywords: ["landing", "landing page", "trang chủ", "marketing", "lead", "thu lead", "ra mắt", "giới thiệu sản phẩm", "khóa học"],
-    // Lead capture form.
-    capabilities: ["forms"],
+    // Lead capture form, hero/product photos, optional course-fee payment.
+    capabilities: ["forms", "files", "payment"],
   },
   pitch_deck: {
     id: "pitch_deck",
@@ -461,8 +469,8 @@ export const APP_MODES: Record<ModeId, ModeDef> = {
     systemHints: HINTS_PITCH_DECK,
     template: TEMPLATE_PITCH_DECK,
     keywords: ["pitch", "deck", "slide", "thuyết trình", "presentation", "gọi vốn", "seed round", "investor"],
-    // Pure static slides.
-    capabilities: [],
+    // Slides may want logos / team photos, but rarely anything else.
+    capabilities: ["files"],
   },
   cv_resume: {
     id: "cv_resume",
@@ -472,8 +480,8 @@ export const APP_MODES: Record<ModeId, ModeDef> = {
     systemHints: HINTS_CV_RESUME,
     template: TEMPLATE_CV_RESUME,
     keywords: ["cv", "resume", "hồ sơ", "portfolio", "lý lịch", "xin việc", "ứng tuyển"],
-    // Static personal page.
-    capabilities: [],
+    // Real avatar upload + portfolio sample images.
+    capabilities: ["files"],
   },
 };
 
