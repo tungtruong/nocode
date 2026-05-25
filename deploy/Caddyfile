@@ -1,0 +1,60 @@
+# JustVibe Caddy config — terminates HTTPS for justvibe.me, *.justvibe.me,
+# and any custom domain a customer has added via /dashboard/data/<id>.
+#
+# Place at /etc/caddy/Caddyfile on the production VPS and:
+#   $ sudo systemctl reload caddy
+#
+# Required ports open on Vinahost: 80 (HTTP-01 challenge) and 443 (TLS).
+# Caddy stores certs at /var/lib/caddy/.local/share/caddy/ by default.
+
+{
+	# Email used in Let's Encrypt account registration. Real address — LE
+	# sends expiry warnings here if the renewal flow ever breaks.
+	email ops@justvibe.me
+
+	# On-demand TLS is gated by an ask endpoint so Caddy doesn't try to
+	# mint certs for random domains pointing at our IP. JustVibe's
+	# /api/cert-ask returns 200 only for domains the owner explicitly added.
+	on_demand_tls {
+		ask https://justvibe.me/api/cert-ask
+		# Cap issuance attempts so a single mis-pointing domain can't
+		# trigger Let's Encrypt rate-limit lockout for the rest.
+		burst   5
+		interval 1m
+	}
+}
+
+# === Apex + wildcard subdomain (managed by us via Cloudflare DNS) ===
+# Cert obtained the usual way — Caddy negotiates wildcard via DNS-01 challenge
+# if you wire a DNS provider plugin; otherwise per-subdomain HTTP-01 is fine
+# for the apex and any specific subdomains we use ourselves.
+justvibe.me, *.justvibe.me {
+	# We currently use Cloudflare in front of the apex for DDoS + caching,
+	# so this block primarily handles requests that bypass CF or come direct
+	# from the on-demand flow below for customer domains.
+	reverse_proxy localhost:3002
+}
+
+# === Custom customer domains — anything else ===
+# `on_demand` here is what makes any verified custom domain (e.g.
+# shop.khachhang.com) automatically receive a Let's Encrypt cert the
+# first time someone hits it over HTTPS.
+:443 {
+	tls {
+		on_demand
+	}
+	reverse_proxy localhost:3002 {
+		# Pass the original Host header so JustVibe's proxy.ts can match
+		# it against the custom_domains table. Caddy already sets these by
+		# default; listed for clarity.
+		header_up Host {host}
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-For {remote_host}
+	}
+}
+
+# Redirect plain HTTP to HTTPS for everything.
+:80 {
+	redir https://{host}{uri} permanent
+}

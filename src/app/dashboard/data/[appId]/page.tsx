@@ -811,23 +811,25 @@ export default function DataPage({ params }: { params: Promise<{ appId: string }
           <div className="rounded-2xl border border-[#e8e8ec] bg-[#fafafa] p-5 text-xs text-[#52525b] space-y-2">
             <h4 className="text-sm font-semibold text-[#18181b]">Hướng dẫn DNS</h4>
             <p>
-              <b>1.</b> Login vào nhà cung cấp DNS (Cloudflare / domain registrar). Thêm CNAME record:
+              Hoạt động với <b>mọi nhà cung cấp DNS</b> — Vinahost, Mat Bao, Tenten, GoDaddy, Namecheap, Cloudflare... Không cần proxy CDN, JustVibe tự cấp HTTPS qua Let&apos;s Encrypt.
+            </p>
+            <p>
+              <b>1.</b> Login vào nhà cung cấp DNS của bạn. Thêm CNAME record:
             </p>
             <pre className="bg-white border border-[#e8e8ec] rounded p-2 font-mono text-[11px] overflow-x-auto">
 {`Type:   CNAME
-Name:   shop  (hoặc subdomain bạn muốn)
-Target: ${appId.slice(0, 8)}.justvibe.me  (slug app của bạn)
-Proxy:  ON (orange cloud — bắt buộc cho HTTPS miễn phí)`}
+Name:   shop                ← subdomain bạn muốn
+Target: proxy.justvibe.me
+TTL:    Auto (hoặc 300)`}
             </pre>
             <p>
-              <b>2.</b> Đợi 1-5 phút để DNS propagate. Bấm <b>Verify</b> ở trên — JV check CNAME và bật routing.
+              <b>2.</b> Đợi 1-5 phút để DNS propagate. Bấm <b>Verify</b> ở trên — JV check CNAME thật + bật routing.
             </p>
             <p>
-              <b>3.</b> <b>Quan trọng</b>: phải bật proxy Cloudflare (orange cloud) để có SSL/HTTPS tự động.
-              Không có CF? Thử <a href="https://www.cloudflare.com/" className="underline text-[#7c3aed]" target="_blank" rel="noopener noreferrer">cloudflare.com</a> miễn phí.
+              <b>3.</b> Lần đầu khách truy cập <code>https://shop.example.com</code>, JV tự xin cert Let&apos;s Encrypt trong ~30 giây. Sau đó cache + auto-renew. Không tốn phí, không cần config gì thêm.
             </p>
             <p className="text-amber-700">
-              ⚠ Apex domain (vd <code>example.com</code> không có subdomain) hiện chưa support — dùng subdomain.
+              ⚠ Apex domain (vd <code>example.com</code> không có subdomain) hiện chưa support — DNS provider phổ thông không cho CNAME ở root. Dùng subdomain (<code>www.</code>, <code>shop.</code>, ...).
             </p>
           </div>
         </div>
