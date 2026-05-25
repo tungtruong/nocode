@@ -19,12 +19,12 @@ export async function GET(req: NextRequest) {
   if (!code || !state) return fail("oauth_invalid_params");
 
   const cookieStore = await cookies();
-  const stateRaw = cookieStore.get("nocode_oauth_zalo")?.value;
+  const stateRaw = cookieStore.get("justvibe_oauth_zalo")?.value;
   if (!stateRaw) return fail("oauth_state_missing");
   let saved: { s: string; ref?: string; r?: string };
   try { saved = JSON.parse(stateRaw); } catch { return fail("oauth_state_corrupt"); }
   if (saved.s !== state) return fail("oauth_state_mismatch");
-  cookieStore.delete({ name: "nocode_oauth_zalo", path: "/api/auth/zalo" });
+  cookieStore.delete({ name: "justvibe_oauth_zalo", path: "/api/auth/zalo" });
 
   try {
     const tokens = await exchangeCodeForToken(code);

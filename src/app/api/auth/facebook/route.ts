@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
   const state = randomBytes(16).toString("hex");
   const stateData = JSON.stringify({ s: state, ref, r: safeRedirect });
 
-  (await cookies()).set("nocode_oauth_fb", stateData, {
+  (await cookies()).set("justvibe_oauth_fb", stateData, {
     httpOnly: true,
     secure: process.env.DEV_INSECURE_COOKIE !== "true",
     sameSite: "lax",

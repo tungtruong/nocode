@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
 
   // Cookie scoped to /api/auth/google so it doesn't leak elsewhere.
   // 10-minute TTL is plenty for a user to click through Google.
-  (await cookies()).set("nocode_oauth", stateData, {
+  (await cookies()).set("justvibe_oauth", stateData, {
     httpOnly: true,
     secure: process.env.DEV_INSECURE_COOKIE !== "true",
     sameSite: "lax",

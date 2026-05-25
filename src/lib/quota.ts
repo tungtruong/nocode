@@ -77,6 +77,33 @@ export const MAX_TURNS_PER_TIER: Record<Tier, number> = {
   team: 20,
 };
 
+// How many in-progress projects (chat history rows) a user can keep, and how
+// many deployed apps (subdomain-claiming rows) they can own. Free is kept tight
+// to discourage slug-squatting; Team has no draft cap so a studio juggling many
+// client projects isn't blocked. Counts include archived rows — caller can
+// drop archived from the count once we implement archive.
+export const PROJECT_LIMITS: Record<Tier, number> = {
+  free: 3,
+  pro: 30,
+  team: Number.MAX_SAFE_INTEGER,
+};
+
+export const DEPLOY_LIMITS: Record<Tier, number> = {
+  free: 2,
+  pro: 20,
+  team: 100,
+};
+
+export function projectLimit(email: string): number {
+  if (isUnlimited()) return Number.MAX_SAFE_INTEGER;
+  return PROJECT_LIMITS[tierFor(email)];
+}
+
+export function deployLimit(email: string): number {
+  if (isUnlimited()) return Number.MAX_SAFE_INTEGER;
+  return DEPLOY_LIMITS[tierFor(email)];
+}
+
 export const TIER_LABELS: Record<Tier, string> = {
   free: "Miễn phí",
   pro: "Pro",

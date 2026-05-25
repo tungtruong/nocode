@@ -242,6 +242,10 @@ export const t = {
     templateFlagNotePlaceholder: "Mô tả thêm (không bắt buộc)...",
     templateFlagSubmit: "Gửi phản hồi",
     templateFlagThanks: "Cảm ơn — phản hồi đã ghi nhận",
+
+    // Limit errors (returned by API as plain VI messages)
+    limitProjectsExceeded: "Đã đạt giới hạn dự án của gói {tier} ({used}/{quota}). Xóa dự án cũ hoặc nâng gói để tiếp tục.",
+    limitDeploysExceeded: "Đã đạt giới hạn app deploy của gói {tier} ({used}/{quota}). Xóa app cũ hoặc nâng gói để tiếp tục.",
   },
 
   en: {
@@ -485,5 +489,8 @@ export const t = {
     templateFlagNotePlaceholder: "Tell us more (optional)...",
     templateFlagSubmit: "Send feedback",
     templateFlagThanks: "Thanks — feedback received",
+
+    limitProjectsExceeded: "Reached the {tier} plan project limit ({used}/{quota}). Delete old projects or upgrade to continue.",
+    limitDeploysExceeded: "Reached the {tier} plan deploy limit ({used}/{quota}). Delete old apps or upgrade to continue.",
   },
 } as const;

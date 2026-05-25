@@ -153,7 +153,7 @@ export default function RulesPage() {
           </ul>
         </div>
         <div className="mt-6 text-center">
-          <p className="text-xs text-[#d4d4d8]">{t.rulesReport} <a href="mailto:abuse@nocode.dev" className="text-[#7c3aed] hover:underline">abuse@nocode.dev</a></p>
+          <p className="text-xs text-[#d4d4d8]">{t.rulesReport} <a href="mailto:abuse@justvibe.me" className="text-[#7c3aed] hover:underline">abuse@justvibe.me</a></p>
         </div>
       </section>
       <footer className="border-t border-[#e8e8ec] px-6 py-6 text-center">

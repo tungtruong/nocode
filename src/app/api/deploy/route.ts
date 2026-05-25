@@ -3,7 +3,8 @@ import { v4 as uuidv4 } from "uuid";
 import fs from "fs/promises";
 import path from "path";
 import { requireSession, authError } from "@/lib/auth";
-import { addApp, getApp, getProject, logTemplateUsage, pickSlug } from "@/lib/store";
+import { addApp, getApp, getProject, logTemplateUsage, pickSlug, countAppsByUser } from "@/lib/store";
+import { deployLimit, tierFor, TIER_LABELS } from "@/lib/quota";
 
 const MAX_HTML_SIZE = 5 * 1024 * 1024; // 5MB
 
@@ -48,6 +49,7 @@ export async function POST(req: NextRequest) {
     // UUID so two projects can never collide.
     let id: string;
     let existingSlug: string | null = null;
+    let isNewDeploy = false;
     if (projectId && isSafeId(projectId)) {
       const existing = await getApp(projectId);
       if (existing) {
@@ -60,10 +62,27 @@ export async function POST(req: NextRequest) {
         // First deploy for this project — use the projectId itself as the
         // app id so subsequent deploys are idempotent.
         id = projectId;
+        isNewDeploy = true;
       }
     } else {
       // Legacy: caller didn't send projectId, fall back to fresh UUID.
       id = uuidv4().replace(/-/g, "");
+      isNewDeploy = true;
+    }
+
+    // Block new deploys past the plan's limit. Re-deploys (same projectId,
+    // existing row) pass through unconditionally.
+    if (isNewDeploy) {
+      const used = countAppsByUser(session.email);
+      const quota = deployLimit(session.email);
+      if (used >= quota) {
+        const tier = tierFor(session.email);
+        return NextResponse.json({
+          error: `Đã đạt giới hạn app deploy của gói ${TIER_LABELS[tier]} (${used}/${quota}). Xóa app cũ hoặc nâng gói để tiếp tục.`,
+          code: "DEPLOY_LIMIT_EXCEEDED",
+          used, quota, tier,
+        }, { status: 403 });
+      }
     }
 
     const dir = path.join(process.cwd(), "public", "apps", id);

@@ -26,7 +26,7 @@ No test runner is configured.
 
 ## Architecture
 
-This is **nocode** — an AI-powered single-file HTML web-app builder. The user describes an app in chat; an LLM streams back a complete `<!DOCTYPE html>…</html>` document, which is rendered live in an iframe and can be one-click "deployed" as a static page under `/apps/<id>`.
+This is **JustVibe** (deployed at https://justvibe.me, GH repo still named `tungtruong/nocode` for legacy reasons) — an AI-powered single-file HTML web-app builder. The user describes an app in chat; an LLM streams back a complete `<!DOCTYPE html>…</html>` document, which is rendered live in an iframe and can be one-click "deployed" as a static page served from `<slug>.justvibe.me` (wildcard subdomain) or `/apps/<id>`.
 
 ### Two AI endpoints
 
@@ -56,7 +56,7 @@ Deployed apps are written as static files to `public/apps/<id>/index.html` and s
 
 ### Auth
 
-`src/lib/auth.ts` — JWT (jose) stored in an `httpOnly` cookie `nocode_session`, 7-day expiry. Credentials are hardcoded in the same file (`demo@nocode.dev` / `demo123`, `admin@nocode.dev` / `admin123`). `next-auth` is a dependency but **not used** — don't be misled.
+`src/lib/auth.ts` — JWT (jose) stored in an `httpOnly` cookie `justvibe_session`, 1-hour expiry. Mock credentials (only in dev / when `ALLOW_MOCK_AUTH=true`): `demo@justvibe.me` / `demo123`, `admin@justvibe.me` / `admin123`. Primary auth in prod is Google OAuth (Facebook + Zalo wired but UI-hidden by policy). `next-auth` is a dependency but **not used** — don't be misled.
 
 Every protected API route uses the same idiom:
 ```ts

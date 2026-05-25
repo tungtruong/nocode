@@ -57,10 +57,10 @@ const PREVIEW_SHIM = `<script>(function(){
   // iframe's DevTools console.
   window.addEventListener('error', function(ev){
     var msg = (ev.error && ev.error.message) || ev.message || 'Lỗi không xác định';
-    var bar = document.getElementById('__nocode_err__');
+    var bar = document.getElementById('__justvibe_err__');
     if (!bar) {
       bar = document.createElement('div');
-      bar.id = '__nocode_err__';
+      bar.id = '__justvibe_err__';
       bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;background:#dc2626;color:#fff;font:12px/1.4 -apple-system,sans-serif;padding:8px 12px;z-index:2147483647;box-shadow:0 -2px 8px rgba(0,0,0,.3);max-height:30vh;overflow:auto;';
       (document.body || document.documentElement).appendChild(bar);
     }
@@ -72,9 +72,9 @@ const PREVIEW_SHIM = `<script>(function(){
 // appearing one by one" when the preview swaps to the final HTML. We only
 // animate the first ~2 levels under <body> so a 50-row todo list doesn't
 // produce a 3-second cascade. Capped at ~1s total wall-clock.
-const PREVIEW_ANIM_STYLE = `<style data-nocode-anim>
-@keyframes __nocode_fadein__ { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-body > *, body > * > * { animation: __nocode_fadein__ .35s ease-out both; }
+const PREVIEW_ANIM_STYLE = `<style data-justvibe-anim>
+@keyframes __justvibe_fadein__ { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+body > *, body > * > * { animation: __justvibe_fadein__ .35s ease-out both; }
 </style>`;
 const PREVIEW_ANIM_SCRIPT = `<script>(function(){
   try {

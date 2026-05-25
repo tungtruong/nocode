@@ -272,6 +272,20 @@ export function logTemplateUsage(
 // to compare to default in switch statements.
 void DEFAULT_MODE;
 
+// Count owned rows for tier-limit checks. Cheap (indexed by user_email).
+export function countProjectsByUser(email: string): number {
+  const r = getDb()
+    .prepare("SELECT COUNT(*) AS n FROM projects WHERE user_email = ?")
+    .get(email) as { n: number };
+  return r.n;
+}
+export function countAppsByUser(email: string): number {
+  const r = getDb()
+    .prepare("SELECT COUNT(*) AS n FROM apps WHERE user_email = ?")
+    .get(email) as { n: number };
+  return r.n;
+}
+
 export async function deleteProject(id: string, userEmail: string): Promise<boolean> {
   if (!isSafeProjectId(id)) return false;
   const result = getDb()

@@ -25,13 +25,13 @@ export async function GET(req: NextRequest) {
   // anyone could craft a callback URL and log a victim into the attacker's
   // Google account (CSRF on OAuth).
   const cookieStore = await cookies();
-  const stateRaw = cookieStore.get("nocode_oauth")?.value;
+  const stateRaw = cookieStore.get("justvibe_oauth")?.value;
   if (!stateRaw) return fail("oauth_state_missing");
   let saved: { s: string; ref?: string; r?: string };
   try { saved = JSON.parse(stateRaw); } catch { return fail("oauth_state_corrupt"); }
   if (saved.s !== state) return fail("oauth_state_mismatch");
   // One-shot: clear the cookie now so a stolen URL can't be replayed.
-  cookieStore.delete({ name: "nocode_oauth", path: "/api/auth/google" });
+  cookieStore.delete({ name: "justvibe_oauth", path: "/api/auth/google" });
 
   try {
     const tokens = await exchangeCodeForToken(code, `${origin}/api/auth/google/callback`);

@@ -4,7 +4,9 @@ import bcrypt from "bcryptjs";
 import { getDb } from "@/lib/db";
 
 const SECRET = new TextEncoder().encode(process.env.AUTH_SECRET || (() => { throw new Error("AUTH_SECRET not configured"); })());
-const COOKIE_NAME = "nocode_session";
+// Session cookie name. Renaming from `nocode_session` invalidates every active
+// session — that's intentional during the JustVibe rebrand (one-time logout).
+const COOKIE_NAME = "justvibe_session";
 
 export interface Session {
   email: string;
@@ -60,8 +62,8 @@ function normalizeEmail(email: string): string {
 
 // Mock users for dev only. In production, gate behind ALLOW_MOCK_AUTH=true.
 const MOCK_USERS: Record<string, { password: string; name: string }> = {
-  "demo@nocode.dev": { password: "demo123", name: "Demo User" },
-  "admin@nocode.dev": { password: "admin123", name: "Admin" },
+  "demo@justvibe.me": { password: "demo123", name: "Demo User" },
+  "admin@justvibe.me": { password: "admin123", name: "Admin" },
 };
 
 function mockAuthAllowed(): boolean {

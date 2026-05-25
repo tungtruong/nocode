@@ -107,7 +107,7 @@ export default function LoginPage() {
                 {loading ? t.loginLoading : t.loginBtn}
               </button>
               <p className="text-center text-[10px] text-[#cbd5e1]">
-                {t.loginDemo} <span className="font-medium text-[#94a3b8]">demo@nocode.dev</span> / <span className="font-medium text-[#94a3b8]">demo123</span>
+                {t.loginDemo} <span className="font-medium text-[#94a3b8]">demo@justvibe.me</span> / <span className="font-medium text-[#94a3b8]">demo123</span>
               </p>
             </form>
           )}
