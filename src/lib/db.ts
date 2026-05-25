@@ -108,6 +108,24 @@ function migrate(db: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS commissions_referrer_idx
       ON commissions(referrer_email, created_at DESC);
+
+    -- File uploads to Cloudflare R2. One row per object stored — used for
+    -- per-user quota enforcement, owner dashboard listing, and bulk-cleanup
+    -- when an app is deleted (DELETE WHERE app_id=?).
+    CREATE TABLE IF NOT EXISTS user_uploads (
+      key            TEXT PRIMARY KEY,
+      user_email     TEXT NOT NULL COLLATE NOCASE,
+      app_id         TEXT NOT NULL,
+      size_bytes     INTEGER NOT NULL,
+      mime           TEXT NOT NULL,
+      original_name  TEXT,
+      uploader_uid   TEXT,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS user_uploads_owner_idx
+      ON user_uploads(user_email, created_at DESC);
+    CREATE INDEX IF NOT EXISTS user_uploads_app_idx
+      ON user_uploads(app_id, created_at DESC);
   `);
 
   // ALTER for tables that pre-existed before the `tier` column was introduced.

@@ -34,6 +34,7 @@ export const JV_RUNTIME_VERSION = "1";
 //   jv.auth.user()                               // {uid, email, name, picture} or null
 //   jv.auth.signIn(returnUrl?)                   // top-nav redirect to Google
 //   jv.auth.signOut()                            // clears cookie, reload optional
+//   jv.files.upload(File)                        // {key, url, size_bytes, mime} (auth required)
 //
 // All write/auth calls send credentials so the per-app session cookie
 // (`__jv_au_<appId>` on .justvibe.me) reaches the API origin cross-subdomain.
@@ -88,6 +89,20 @@ const RUNTIME_BODY = `(function(){
         if (window.top) window.top.location.href = url; else location.href = url;
       },
       signOut: function(){ return jpost("/api/auth/app/signout?app="+encodeURIComponent(APP_ID), {}); }
+    },
+    files: {
+      upload: function(file){
+        if (!file) return Promise.reject(new Error("Thiếu file"));
+        var fd = new FormData();
+        fd.append("file", file);
+        fd.append("appId", APP_ID);
+        return fetch(API + "/api/files/upload", {method:"POST", credentials:"include", body: fd}).then(function(r){
+          return r.json().catch(function(){return {};}).then(function(j){
+            if (!r.ok) throw new Error(j.error || ("HTTP "+r.status));
+            return j; // {key, url, size_bytes, mime}
+          });
+        });
+      }
     }
   };
 })();`;

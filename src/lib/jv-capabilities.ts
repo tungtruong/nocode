@@ -14,9 +14,9 @@
 //   3. Add the name to CAPABILITY_NAMES.
 //   4. Update the classifier's prompt + schema in capability-classifier.ts.
 
-export type CapabilityName = "forms" | "db" | "auth";
+export type CapabilityName = "forms" | "db" | "auth" | "files";
 
-export const CAPABILITY_NAMES: readonly CapabilityName[] = ["forms", "db", "auth"] as const;
+export const CAPABILITY_NAMES: readonly CapabilityName[] = ["forms", "db", "auth", "files"] as const;
 
 export interface Capability {
   name: CapabilityName;
@@ -133,10 +133,60 @@ NEVER write your own OAuth button, Google SDK loader, or login form — the
 runtime handles all of it.`,
 };
 
+const FILES: Capability = {
+  name: "files",
+  summary: "`files` — upload images / PDFs / audio via window.jv.files.upload. Returns a permanent public URL. Auth required (owner or end-user).",
+  docs: `## FILES — \`window.jv.files\` (upload to JustVibe storage)
+Use when the app needs the OWNER or an END-USER to attach a real file:
+product / menu photos, CV avatar, journal attachments, voice notes, PDFs.
+
+API (Promises):
+  // file is a File or Blob (e.g. from <input type="file"> or canvas.toBlob)
+  const result = await jv.files.upload(file);
+  // → { key, url, size_bytes, mime }
+  // Use \`url\` directly in <img src>, <a href>, <video src>, etc.
+  // Persist \`url\` or \`key\` in jv.db so it survives reloads.
+
+Requires authentication — wrap upload calls behind \`jv.auth.user()\` check, or
+trigger only from the owner's dashboard view (when sandboxed). The runtime
+sends the per-app session cookie automatically.
+
+Limits:
+- Images (jpeg/png/webp/gif/heic): 10MB each
+- SVG: 1MB
+- PDF: 20MB
+- Audio (mp3/wav/m4a/ogg/webm): 20MB
+- Video (mp4/webm): 50MB
+- Per-owner storage quota: 50MB free / 5GB Pro / 50GB Max
+- Rate limit: 20 uploads / min / IP
+
+Typical pattern — picture upload then save the URL into a jv.db row:
+  document.getElementById('upload').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const { url } = await jv.files.upload(file);
+      await jv.db.add('products', { name: 'Cafe sữa', image: url, price: 25000 });
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+
+HTML: \`<input type="file" id="upload" accept="image/*">\`.
+
+DO NOT:
+- Upload before validating file size client-side — let the user know early.
+- Send the same upload twice — \`upload()\` is not idempotent (creates a new
+  key each call); store the returned URL and re-use it.
+- Expose owner credentials. The runtime uses the visitor's session, not the
+  owner's — visitors can ONLY upload, not delete (that's dashboard-only).`,
+};
+
 const REGISTRY: Record<CapabilityName, Capability> = {
   forms: FORMS,
   db: DB,
   auth: AUTH,
+  files: FILES,
 };
 
 export function getCapability(name: CapabilityName): Capability {

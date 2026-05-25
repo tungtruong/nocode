@@ -36,6 +36,12 @@ const CASES = [
   ["A personal todo list where each user sees only their own tasks", ["db", "auth"]],
   ["个人日记应用，用Google登录", ["db", "auth"]],
   ["Bookmark manager — sign in to save bookmarks", ["db", "auth"]],
+
+  // files capability — added in R2 sprint
+  ["Catalog quần áo, owner upload ảnh sản phẩm thật", ["db", "files"]],
+  ["Menu cafe có ảnh thật của từng món", ["db", "files"]],
+  ["Journal app, user upload ảnh đính kèm note", ["db", "auth", "files"]],
+  ["CV portfolio với upload avatar thật", ["files"]],
 ];
 
 let pass = 0;

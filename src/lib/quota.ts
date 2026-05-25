@@ -105,6 +105,16 @@ export const DEPLOY_LIMITS: Record<Tier, number> = {
   team: 200,
 };
 
+// R2 file upload storage per user. Free is intentionally tight to keep abuse
+// (someone signing up just to host a movie) small while still letting a real
+// user upload a few menu / product photos. Pro covers a small SMB shop. Max
+// covers a serious catalog or course platform.
+export const UPLOAD_BYTES_LIMITS: Record<Tier, number> = {
+  free:   50 * 1024 * 1024,         //   50 MB
+  pro:     5 * 1024 * 1024 * 1024,  //    5 GB
+  team:   50 * 1024 * 1024 * 1024,  //   50 GB
+};
+
 export function projectLimit(email: string): number {
   if (isUnlimited()) return Number.MAX_SAFE_INTEGER;
   return PROJECT_LIMITS[tierFor(email)];
@@ -113,6 +123,11 @@ export function projectLimit(email: string): number {
 export function deployLimit(email: string): number {
   if (isUnlimited()) return Number.MAX_SAFE_INTEGER;
   return DEPLOY_LIMITS[tierFor(email)];
+}
+
+export function uploadBytesLimit(email: string): number {
+  if (isUnlimited()) return Number.MAX_SAFE_INTEGER;
+  return UPLOAD_BYTES_LIMITS[tierFor(email)];
 }
 
 // === TOKEN TOPUP PACKS ===
