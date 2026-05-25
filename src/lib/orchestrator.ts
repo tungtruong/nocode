@@ -17,10 +17,12 @@
 // Only the catch-all `web_app` mode (or ambiguous prompts) hit the LLM.
 
 import { createCompletionWithFallback } from "./ai";
-import { recordUsage } from "./quota";
+import { recordUsage, tierFor, type Tier } from "./quota";
 import { CAPABILITY_NAMES, type CapabilityName, getCapability } from "./jv-capabilities";
 import { APP_MODES, DEFAULT_MODE, type ModeId, isValidModeId } from "./modes";
 import { keywordPickMode } from "./intent";
+
+const TIER_RANK: Record<Tier, number> = { free: 0, pro: 1, team: 2 };
 
 export interface PlanSuggestion {
   cap: CapabilityName;
@@ -29,10 +31,20 @@ export interface PlanSuggestion {
   reason: string;
 }
 
+export interface TierWarning {
+  cap: CapabilityName;
+  requires: Tier;
+  current: Tier;
+}
+
 export interface AppPlan {
   mode: ModeId;
   caps: CapabilityName[];
   suggestions: PlanSuggestion[];
+  /** Capabilities in `caps` whose minTier exceeds the caller's tier — UI
+   *  uses this to show a soft upgrade nudge. Empty when caller is on a
+   *  high enough tier OR when no caller email is passed. */
+  tierWarnings: TierWarning[];
   source: "keyword+template" | "llm" | "llm_fallback" | "error_default";
   confidence: number;
 }
@@ -135,8 +147,18 @@ function pickSuggestions(value: unknown, chosenCaps: readonly CapabilityName[]):
 export async function planApp(message: string, userEmail?: string): Promise<AppPlan> {
   const trimmed = message.trim().slice(0, 800);
   if (!trimmed) {
-    return { mode: DEFAULT_MODE, caps: [], suggestions: [], source: "keyword+template", confidence: 0 };
+    return { mode: DEFAULT_MODE, caps: [], suggestions: [], tierWarnings: [], source: "keyword+template", confidence: 0 };
   }
+
+  const computeTierWarnings = (caps: readonly CapabilityName[]): TierWarning[] => {
+    if (!userEmail) return [];
+    const current = tierFor(userEmail);
+    const cur = TIER_RANK[current];
+    return caps
+      .map((c) => ({ cap: c, requires: getCapability(c).minTier }))
+      .filter((w) => TIER_RANK[w.requires] > cur)
+      .map((w) => ({ ...w, current }));
+  };
 
   // Fast-path: keyword pick a niche template — cheap, deterministic,
   // and the template already declares its capability needs.
@@ -144,10 +166,12 @@ export async function planApp(message: string, userEmail?: string): Promise<AppP
   if (fastMode && fastMode !== DEFAULT_MODE) {
     const def = APP_MODES[fastMode];
     console.log(`[ORCH] fast-path mode=${fastMode} caps=${JSON.stringify(def.capabilities ?? [])}`);
+    const caps = def.capabilities ?? [];
     return {
       mode: fastMode,
-      caps: def.capabilities ?? [],
+      caps,
       suggestions: [],
+      tierWarnings: computeTierWarnings(caps),
       source: "keyword+template",
       confidence: 1.0,
     };
@@ -188,6 +212,7 @@ export async function planApp(message: string, userEmail?: string): Promise<AppP
         mode: DEFAULT_MODE,
         caps: ALL_CAPS_DEFAULT,
         suggestions: [],
+        tierWarnings: computeTierWarnings(ALL_CAPS_DEFAULT),
         source: "llm_fallback",
         confidence: 0,
       };
@@ -199,13 +224,21 @@ export async function planApp(message: string, userEmail?: string): Promise<AppP
     console.log(
       `[ORCH] (${provider.name}) mode=${mode} caps=${JSON.stringify(caps)} sug=${suggestions.length}`,
     );
-    return { mode, caps, suggestions, source: "llm", confidence: 0.85 };
+    return {
+      mode,
+      caps,
+      suggestions,
+      tierWarnings: computeTierWarnings(caps),
+      source: "llm",
+      confidence: 0.85,
+    };
   } catch (err) {
     console.error("[ORCH] error, defaulting:", err instanceof Error ? err.message : err);
     return {
       mode: DEFAULT_MODE,
       caps: ALL_CAPS_DEFAULT,
       suggestions: [],
+      tierWarnings: computeTierWarnings(ALL_CAPS_DEFAULT),
       source: "error_default",
       confidence: 0,
     };

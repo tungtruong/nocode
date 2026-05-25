@@ -115,6 +115,15 @@ export const UPLOAD_BYTES_LIMITS: Record<Tier, number> = {
   team:   50 * 1024 * 1024 * 1024,  //   50 GB
 };
 
+// Custom domains (shop.khachhang.com → app). Free can't add any to push
+// the "your-app.justvibe.me" brand. Pro for small biz, Max for agencies
+// running many client sites.
+export const CUSTOM_DOMAIN_LIMITS: Record<Tier, number> = {
+  free: 0,
+  pro:  5,
+  team: 50,
+};
+
 export function projectLimit(email: string): number {
   if (isUnlimited()) return Number.MAX_SAFE_INTEGER;
   return PROJECT_LIMITS[tierFor(email)];
@@ -128,6 +137,11 @@ export function deployLimit(email: string): number {
 export function uploadBytesLimit(email: string): number {
   if (isUnlimited()) return Number.MAX_SAFE_INTEGER;
   return UPLOAD_BYTES_LIMITS[tierFor(email)];
+}
+
+export function customDomainLimit(email: string): number {
+  if (isUnlimited()) return Number.MAX_SAFE_INTEGER;
+  return CUSTOM_DOMAIN_LIMITS[tierFor(email)];
 }
 
 // === TOKEN TOPUP PACKS ===

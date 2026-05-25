@@ -26,10 +26,16 @@ export interface Capability {
   // Full how-to. Loaded on demand for /api/edit (tool call) or pre-injected
   // for /api/chat (single-shot generate).
   docs: string;
+  // Minimum subscription tier required to USE this capability in a generated
+  // app. Today we don't hard-block — the orchestrator just surfaces a soft
+  // "this needs Pro/Max" notice so the upgrade prompt is contextual. Hard
+  // enforcement (refuse to gen with the cap) is one config flip away.
+  minTier: "free" | "pro" | "team";
 }
 
 const FORMS: Capability = {
   name: "forms",
+  minTier: "free",
   summary: "`forms` — public form submissions (signup, RSVP, contact, order). HTML <form action='/f/{{APP_ID}}/submit'> → stored as `submissions` for owner.",
   docs: `## FORMS — collect submissions
 For any form that COLLECTS user input (signup, RSVP, contact, order, lead capture):
@@ -55,6 +61,7 @@ Rules:
 
 const DB: Capability = {
   name: "db",
+  minTier: "free",
   summary: "`db` — read/write shared data via window.jv.db (catalog, menu, listings, products). Owner manages rows via /dashboard/data/<appId>.",
   docs: `## DATA — \`window.jv.db\`
 Use for dynamic content the OWNER edits (catalog / menu / listings / events /
@@ -94,6 +101,7 @@ Authenticated write methods (require \`jv.auth\` capability — read its docs):
 
 const AUTH: Capability = {
   name: "auth",
+  minTier: "free",
   summary: "`auth` — per-app end-user login via Google OAuth. window.jv.auth + per-user reads via where:{user_id:'@me'}.",
   docs: `## AUTH — \`window.jv.auth\` (end-user login)
 Use ONLY when the app needs per-user data: journal / notes / personal todo /
@@ -135,6 +143,7 @@ runtime handles all of it.`,
 
 const FILES: Capability = {
   name: "files",
+  minTier: "pro",
   summary: "`files` — upload images / PDFs / audio via window.jv.files.upload. Returns a permanent public URL. Auth required (owner or end-user).",
   docs: `## FILES — \`window.jv.files\` (upload to JustVibe storage)
 Use when the app needs the OWNER or an END-USER to attach a real file:
@@ -184,6 +193,7 @@ DO NOT:
 
 const REALTIME: Capability = {
   name: "realtime",
+  minTier: "team",
   summary: "`realtime` — live subscribe to jv.db changes via window.jv.realtime.subscribe (chat, live counters, live orders, multiplayer).",
   docs: `## REALTIME — \`window.jv.realtime\` (live data updates)
 Use when the app needs to react INSTANTLY to data changes — chat / comments,
@@ -239,6 +249,7 @@ Rules:
 
 const PAYMENT: Capability = {
   name: "payment",
+  minTier: "pro",
   summary: "`payment` — generate VietQR for any VN bank (Vietcombank/MB/Techcombank/...) so users scan + transfer instantly. Zero fees, offline gen.",
   docs: `## PAYMENT — \`window.jv.payment\` (VietQR — VN instant bank transfer)
 Use when the app needs to ACCEPT money: booking deposit, event ticket,

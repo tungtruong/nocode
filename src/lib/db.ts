@@ -137,6 +137,22 @@ function migrate(db: Database.Database) {
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (app_id, key)
     );
+
+    -- Custom domains. Owners point their own domain (e.g. shop.example.com)
+    -- via CNAME to <slug>.justvibe.me; the proxy resolves Host header → app_id
+    -- and rewrites internally. SSL is handled by the user's CDN (Cloudflare
+    -- orange-cloud proxy recommended in the dashboard instructions).
+    CREATE TABLE IF NOT EXISTS custom_domains (
+      domain      TEXT PRIMARY KEY,
+      app_id      TEXT NOT NULL,
+      user_email  TEXT NOT NULL COLLATE NOCASE,
+      verified_at TEXT,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS custom_domains_owner_idx
+      ON custom_domains(user_email, created_at DESC);
+    CREATE INDEX IF NOT EXISTS custom_domains_app_idx
+      ON custom_domains(app_id);
   `);
 
   // ALTER for tables that pre-existed before the `tier` column was introduced.

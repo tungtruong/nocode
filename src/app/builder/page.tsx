@@ -201,6 +201,7 @@ export default function BuilderPage() {
     mode: string;
     caps: string[];
     suggestions: Array<{ cap: string; reason: string }>;
+    tierWarnings?: Array<{ cap: string; requires: string; current: string }>;
     source: string;
   } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -298,6 +299,10 @@ export default function BuilderPage() {
   // Toast shown right after deploy when the app has a form and the owner
   // hasn't bound a sheet for it yet — the natural moment to ask.
   const [formNudge, setFormNudge] = useState<{ appId: string } | null>(null);
+  // Pre-setup nudges fire after deploy when the plan's caps require owner
+  // configuration that isn't done yet (e.g. payment without bank info).
+  // Reused for any future cap that needs a "go set me up" step.
+  const [setupNudges, setSetupNudges] = useState<Array<{ cap: string; label: string; href: string }>>([]);
 
   const deploy = useCallback(async (h: string): Promise<string | null> => {
     setDeploying(true);
@@ -317,6 +322,29 @@ export default function BuilderPage() {
       // submissions silently fall into JV's transient table.
       if (/\/f\/[a-z0-9-]+\/submit/i.test(h) && appId) {
         setFormNudge({ appId });
+      }
+      // Pre-setup check — for caps that need owner config to actually work
+      // in the deployed app, look up current config and queue a nudge if
+      // it's missing. Only `payment` needs setup so far; structure is open
+      // for future caps (e.g. `email_from` whenever email ships).
+      if (appId && lastPlan?.caps?.includes("payment")) {
+        try {
+          const pc = await fetch(`/api/payment/${appId}/config`);
+          if (pc.ok) {
+            const pd = await pc.json();
+            if (!pd.vietqr) {
+              setSetupNudges((prev) => {
+                const next = prev.filter((n) => n.cap !== "payment");
+                next.push({
+                  cap: "payment",
+                  label: "Cấu hình ngân hàng để app nhận thanh toán",
+                  href: `/dashboard/data/${appId}?tab=payment`,
+                });
+                return next;
+              });
+            }
+          }
+        } catch { /* network blip — skip nudge, owner can configure anytime */ }
       }
       return d.url as string;
     } catch (e) {
@@ -513,6 +541,7 @@ export default function BuilderPage() {
                 const planJson = JSON.parse(decodeURIComponent(pl.slice(5))) as {
                   mode: string; caps: string[];
                   suggestions: Array<{ cap: string; reason: string }>;
+                  tierWarnings?: Array<{ cap: string; requires: string; current: string }>;
                   source: string;
                 };
                 setLastPlan(planJson);
@@ -1302,6 +1331,40 @@ export default function BuilderPage() {
         </div>
       )}
 
+      {setupNudges.length > 0 && (
+        <div className="fixed bottom-6 left-6 z-50 max-w-sm rounded-2xl border border-amber-300 bg-amber-50 p-4 shadow-2xl">
+          <div className="flex items-start gap-3">
+            <div className="text-xl shrink-0">⚠</div>
+            <div className="flex-1 min-w-0">
+              <h4 className="font-semibold text-sm text-amber-900 mb-1">Cần cấu hình trước khi app chạy được</h4>
+              <ul className="text-xs text-amber-900 space-y-2 mb-3">
+                {setupNudges.map((n) => (
+                  <li key={n.cap} className="flex items-center justify-between gap-2">
+                    <span>{n.label}</span>
+                    <Link
+                      href={n.href}
+                      className="text-xs rounded-md bg-amber-700 text-white px-2.5 py-1 hover:bg-amber-800 shrink-0"
+                      onClick={() => setSetupNudges((p) => p.filter((x) => x.cap !== n.cap))}
+                    >
+                      Cấu hình
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+              <button
+                onClick={() => setSetupNudges([])}
+                className="text-xs text-amber-700 hover:text-amber-900"
+              >Bỏ qua tất cả</button>
+            </div>
+            <button
+              onClick={() => setSetupNudges([])}
+              className="text-amber-700 hover:text-amber-900 text-base leading-none shrink-0"
+              aria-label="Close"
+            >×</button>
+          </div>
+        </div>
+      )}
+
       {showModeModal && (
         <ModePickerModal
           current={mode}
@@ -1457,16 +1520,43 @@ const CAP_LABEL: Record<string, string> = {
   payment:  "Thanh toán",
 };
 
-function PlanBanner({ plan }: { plan: { mode: string; caps: string[] } }) {
-  if (plan.caps.length === 0) return null;
+function PlanBanner({ plan }: {
+  plan: {
+    mode: string;
+    caps: string[];
+    tierWarnings?: Array<{ cap: string; requires: string; current: string }>;
+  };
+}) {
+  if (plan.caps.length === 0 && !plan.tierWarnings?.length) return null;
+  const warnSet = new Set((plan.tierWarnings || []).map((w) => w.cap));
   return (
-    <div className="rounded-lg bg-[#f5f3ff] border border-[#e9d5ff] px-2.5 py-1.5 text-[11px] text-[#5b21b6] flex flex-wrap items-center gap-1.5">
-      <span className="font-medium">Sẽ tạo:</span>
-      {plan.caps.map((c) => (
-        <span key={c} className="inline-flex items-center gap-1 rounded-md bg-white border border-[#e9d5ff] px-1.5 py-0.5">
-          {CAP_LABEL[c] || c}
-        </span>
-      ))}
+    <div className="flex flex-col gap-1.5">
+      {plan.caps.length > 0 && (
+        <div className="rounded-lg bg-[#f5f3ff] border border-[#e9d5ff] px-2.5 py-1.5 text-[11px] text-[#5b21b6] flex flex-wrap items-center gap-1.5">
+          <span className="font-medium">Sẽ tạo:</span>
+          {plan.caps.map((c) => (
+            <span
+              key={c}
+              className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 ${
+                warnSet.has(c)
+                  ? "bg-amber-50 border-amber-300 text-amber-800"
+                  : "bg-white border-[#e9d5ff]"
+              }`}
+              title={warnSet.has(c) ? "Cần nâng cấp gói" : undefined}
+            >
+              {CAP_LABEL[c] || c}
+              {warnSet.has(c) && <span aria-hidden>⬆</span>}
+            </span>
+          ))}
+        </div>
+      )}
+      {plan.tierWarnings && plan.tierWarnings.length > 0 && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[11px] text-amber-900">
+          ⚡ {plan.tierWarnings.map((w) => `${CAP_LABEL[w.cap] || w.cap} cần ${w.requires.toUpperCase()}`).join(" · ")}
+          {" — "}
+          <Link href="/pricing" className="underline font-medium">Nâng cấp</Link>
+        </div>
+      )}
     </div>
   );
 }

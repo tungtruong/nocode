@@ -31,7 +31,7 @@ interface FileItem {
 
 export default function DataPage({ params }: { params: Promise<{ appId: string }> }) {
   const { appId } = use(params);
-  const [tab, setTab] = useState<"tables" | "files" | "payment">("tables");
+  const [tab, setTab] = useState<"tables" | "files" | "payment" | "domain">("tables");
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [selected, setSelected] = useState<string>("");
   const [newTableInput, setNewTableInput] = useState("");
@@ -54,6 +54,11 @@ export default function DataPage({ params }: { params: Promise<{ appId: string }
   const [vietqrSaving, setVietqrSaving] = useState(false);
   const [vietqrSaved, setVietqrSaved] = useState(false);
   const [vietqrVersion, setVietqrVersion] = useState(0);
+  const [domains, setDomains] = useState<Array<{ domain: string; verified_at: string | null; created_at: string }>>([]);
+  const [domainQuota, setDomainQuota] = useState<{ used: number; cap: number } | null>(null);
+  const [domainInput, setDomainInput] = useState("");
+  const [domainBusy, setDomainBusy] = useState(false);
+  const [domainMsg, setDomainMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   const loadTables = useCallback(async () => {
     setLoadingTables(true);
@@ -224,6 +229,84 @@ export default function DataPage({ params }: { params: Promise<{ appId: string }
     }
   };
 
+  const loadDomains = useCallback(async () => {
+    setError("");
+    try {
+      const r = await fetch(`/api/domains/list?app=${appId}`);
+      if (!r.ok) throw new Error((await r.json()).error || "Load failed");
+      const d = await r.json();
+      setDomains(d.domains || []);
+      setDomainQuota(d.quota || null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Lỗi");
+    }
+  }, [appId]);
+
+  useEffect(() => {
+    if (tab === "domain") queueMicrotask(() => { loadDomains(); });
+  }, [tab, loadDomains]);
+
+  const addDomain = async () => {
+    const domain = domainInput.trim().toLowerCase();
+    if (!domain) return;
+    setDomainBusy(true);
+    setDomainMsg(null);
+    try {
+      const r = await fetch("/api/domains/add", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ app: appId, domain }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Add failed");
+      setDomainInput("");
+      setDomainMsg({ kind: "ok", text: `Đã thêm ${domain}. Tạo CNAME rồi bấm "Verify".` });
+      await loadDomains();
+    } catch (e) {
+      setDomainMsg({ kind: "err", text: e instanceof Error ? e.message : "Lỗi" });
+    } finally {
+      setDomainBusy(false);
+    }
+  };
+
+  const verifyDomain = async (domain: string) => {
+    setDomainBusy(true);
+    setDomainMsg(null);
+    try {
+      const r = await fetch("/api/domains/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ domain }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Verify failed");
+      setDomainMsg({ kind: "ok", text: `${domain} đã verified ✓ — app đang chạy ở https://${domain}` });
+      await loadDomains();
+    } catch (e) {
+      setDomainMsg({ kind: "err", text: e instanceof Error ? e.message : "Lỗi" });
+    } finally {
+      setDomainBusy(false);
+    }
+  };
+
+  const removeDomainAction = async (domain: string) => {
+    if (!confirm(`Xoá domain ${domain}?`)) return;
+    setDomainBusy(true);
+    try {
+      const r = await fetch("/api/domains/remove", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ domain }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error || "Remove failed");
+      await loadDomains();
+    } catch (e) {
+      setDomainMsg({ kind: "err", text: e instanceof Error ? e.message : "Lỗi" });
+    } finally {
+      setDomainBusy(false);
+    }
+  };
+
   const addRow = async () => {
     setBusy(true);
     setError("");
@@ -340,6 +423,14 @@ export default function DataPage({ params }: { params: Promise<{ appId: string }
             }`}
           >
             💳 Thanh toán <span className="text-[10px] text-[#94a3b8]">jv.payment</span>
+          </button>
+          <button
+            onClick={() => setTab("domain")}
+            className={`px-4 py-2 text-sm font-medium transition border-b-2 ${
+              tab === "domain" ? "border-[#7c3aed] text-[#7c3aed]" : "border-transparent text-[#71717a] hover:text-[#18181b]"
+            }`}
+          >
+            🌐 Domain riêng
           </button>
         </div>
 
@@ -634,6 +725,110 @@ export default function DataPage({ params }: { params: Promise<{ appId: string }
             ) : (
               <div className="text-center py-12 text-sm text-[#94a3b8]">Chưa có cấu hình.</div>
             )}
+          </div>
+        </div>
+        )}
+
+        {tab === "domain" && (
+        <div className="space-y-5">
+          <div className="rounded-2xl border border-[#e8e8ec] bg-white p-5">
+            <h3 className="text-base font-semibold mb-1">Domain riêng cho app</h3>
+            <p className="text-xs text-[#52525b] mb-4">
+              Trỏ domain của bạn (vd <code>shop.example.com</code>) về app này — khách thấy URL riêng thay vì <code>{appId.slice(0, 8)}…justvibe.me</code>.
+            </p>
+
+            {domainQuota && (
+              <div className="mb-4 text-xs text-[#52525b] flex items-center gap-2">
+                <span>Đã dùng <b>{domainQuota.used}/{domainQuota.cap}</b> domain</span>
+                {domainQuota.used >= domainQuota.cap && (
+                  <span className="text-amber-700">— hết quota, nâng cấp gói để thêm.</span>
+                )}
+              </div>
+            )}
+
+            <div className="flex gap-2 mb-3">
+              <input
+                type="text"
+                value={domainInput}
+                onChange={(e) => setDomainInput(e.target.value.toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, ""))}
+                placeholder="shop.example.com"
+                className="flex-1 text-sm px-3 py-2 rounded-lg border border-[#e8e8ec]"
+                onKeyDown={(e) => { if (e.key === "Enter" && !domainBusy) addDomain(); }}
+              />
+              <button
+                onClick={addDomain}
+                disabled={domainBusy || !domainInput.trim() || (domainQuota ? domainQuota.used >= domainQuota.cap : false)}
+                className="text-sm px-4 py-2 rounded-lg bg-[#7c3aed] text-white hover:bg-[#6d28d9] disabled:opacity-40"
+              >
+                Thêm
+              </button>
+            </div>
+
+            {domainMsg && (
+              <div className={`text-xs px-3 py-2 rounded-lg mb-3 ${
+                domainMsg.kind === "ok" ? "bg-emerald-50 text-emerald-800 border border-emerald-200" : "bg-red-50 text-red-700 border border-red-200"
+              }`}>{domainMsg.text}</div>
+            )}
+
+            <div className="space-y-3">
+              {domains.length === 0 ? (
+                <div className="text-xs text-[#94a3b8] text-center py-6">Chưa có domain nào.</div>
+              ) : domains.map((d) => (
+                <div key={d.domain} className="rounded-xl border border-[#e8e8ec] bg-[#fafafa] p-3">
+                  <div className="flex items-start justify-between gap-2 flex-wrap">
+                    <div>
+                      <div className="font-mono text-sm font-medium">{d.domain}</div>
+                      <div className="text-xs mt-0.5">
+                        {d.verified_at ? (
+                          <a href={`https://${d.domain}`} target="_blank" rel="noopener noreferrer" className="text-emerald-700 hover:underline">
+                            ✓ Verified · Mở https://{d.domain}
+                          </a>
+                        ) : (
+                          <span className="text-amber-700">⏳ Đợi verify DNS</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-1.5">
+                      {!d.verified_at && (
+                        <button
+                          onClick={() => verifyDomain(d.domain)}
+                          disabled={domainBusy}
+                          className="text-xs px-2.5 py-1 rounded border border-[#7c3aed] text-[#7c3aed] hover:bg-[#f5f3ff] disabled:opacity-40"
+                        >Verify</button>
+                      )}
+                      <button
+                        onClick={() => removeDomainAction(d.domain)}
+                        disabled={domainBusy}
+                        className="text-xs px-2.5 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40"
+                      >Xoá</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-[#e8e8ec] bg-[#fafafa] p-5 text-xs text-[#52525b] space-y-2">
+            <h4 className="text-sm font-semibold text-[#18181b]">Hướng dẫn DNS</h4>
+            <p>
+              <b>1.</b> Login vào nhà cung cấp DNS (Cloudflare / domain registrar). Thêm CNAME record:
+            </p>
+            <pre className="bg-white border border-[#e8e8ec] rounded p-2 font-mono text-[11px] overflow-x-auto">
+{`Type:   CNAME
+Name:   shop  (hoặc subdomain bạn muốn)
+Target: ${appId.slice(0, 8)}.justvibe.me  (slug app của bạn)
+Proxy:  ON (orange cloud — bắt buộc cho HTTPS miễn phí)`}
+            </pre>
+            <p>
+              <b>2.</b> Đợi 1-5 phút để DNS propagate. Bấm <b>Verify</b> ở trên — JV check CNAME và bật routing.
+            </p>
+            <p>
+              <b>3.</b> <b>Quan trọng</b>: phải bật proxy Cloudflare (orange cloud) để có SSL/HTTPS tự động.
+              Không có CF? Thử <a href="https://www.cloudflare.com/" className="underline text-[#7c3aed]" target="_blank" rel="noopener noreferrer">cloudflare.com</a> miễn phí.
+            </p>
+            <p className="text-amber-700">
+              ⚠ Apex domain (vd <code>example.com</code> không có subdomain) hiện chưa support — dùng subdomain.
+            </p>
           </div>
         </div>
         )}

@@ -259,6 +259,7 @@ export async function POST(req: NextRequest) {
               mode: plan.mode,
               caps: plan.caps,
               suggestions: plan.suggestions,
+              tierWarnings: plan.tierWarnings,
               source: plan.source,
             };
             sendProgress(`plan ${encodeURIComponent(JSON.stringify(slimPlan))}`);
