@@ -145,6 +145,15 @@ export const t = {
     pricingFAQ5Q: "Có thể hủy gói bất cứ lúc nào?",
     pricingFAQ5A: "Có. Vào dashboard → hủy gói. Bạn vẫn dùng quota đến hết kỳ thanh toán hiện tại, sau đó tự động về Free. Không tính phí thoát.",
 
+    pricingRedeemLink: "🎁 Có mã khuyến mãi? Nhập để dùng miễn phí",
+    pricingRedeemTitle: "Nhập mã khuyến mãi",
+    pricingRedeemDesc: "Mã giúp bạn dùng Pro / Max miễn phí trong thời gian giới hạn — không cần thanh toán.",
+    pricingRedeemPlaceholder: "Nhập mã (VD: LAUNCH2026)",
+    pricingRedeemSubmit: "Áp dụng",
+    pricingRedeemCancel: "Đóng",
+    pricingRedeemSuccess: "✓ Đã nâng cấp gói {tier} trong {days} ngày",
+    pricingRedeemError: "Mã không hợp lệ hoặc đã hết hạn",
+
     // Rules
     rulesTitle: "Quy định nền tảng",
     rulesDesc: "Để giữ nền tảng an toàn và sáng tạo, chúng tôi áp dụng các quy định sau cho mọi app được tạo. Nội dung vi phạm sẽ bị chặn.",
@@ -184,7 +193,7 @@ export const t = {
     quotaTier: "Gói",
     quotaResetMonthly: "Reset đầu tháng",
     quotaExceededTitle: "Hết quota tháng này",
-    quotaExceededDesc: "Bạn đã dùng hết {used} / {quota} tokens cho gói {tier}. Quota sẽ reset đầu tháng sau, hoặc nâng cấp gói để tiếp tục ngay.",
+    quotaExceededDesc: "Bạn đã dùng hết {used} / {quota} tokens cho gói {tier}. Quota reset đầu tháng sau, nâng cấp gói để tiếp tục ngay, hoặc bấm Nâng cấp để nhập mã khuyến mãi nếu có.",
     quotaUpgrade: "Xem các gói",
     buildPreviewEmpty: "Xem trước app của bạn",
     buildPreviewHint: "Trò chuyện bên trái để bắt đầu dựng",
@@ -447,6 +456,15 @@ export const t = {
     pricingFAQ5Q: "Can I cancel anytime?",
     pricingFAQ5A: "Yes. Go to dashboard → cancel. You keep the quota until the end of the current billing period, then drop back to Free automatically. No exit fees.",
 
+    pricingRedeemLink: "🎁 Have a promo code? Apply for free",
+    pricingRedeemTitle: "Enter promo code",
+    pricingRedeemDesc: "Codes unlock Pro / Max free for a limited time — no payment needed.",
+    pricingRedeemPlaceholder: "Enter code (e.g. LAUNCH2026)",
+    pricingRedeemSubmit: "Apply",
+    pricingRedeemCancel: "Close",
+    pricingRedeemSuccess: "✓ Upgraded to {tier} for {days} days",
+    pricingRedeemError: "Invalid or expired code",
+
     // Rules
     rulesTitle: "Platform Rules",
     rulesDesc: "To keep our platform safe and creative, we enforce these rules across all app generations. Content that violates these rules will be blocked.",
@@ -486,7 +504,7 @@ export const t = {
     quotaTier: "Plan",
     quotaResetMonthly: "Resets next month",
     quotaExceededTitle: "Monthly quota reached",
-    quotaExceededDesc: "You've used {used} / {quota} tokens on the {tier} plan. Quota resets next month, or upgrade to continue immediately.",
+    quotaExceededDesc: "You've used {used} / {quota} tokens on the {tier} plan. Quota resets next month, or upgrade to continue — pricing page also lets you enter a promo code.",
     quotaUpgrade: "See plans",
     buildPreviewEmpty: "Your app preview",
     buildPreviewHint: "Chat on the left to start building",

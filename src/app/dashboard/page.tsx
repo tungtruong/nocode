@@ -169,7 +169,30 @@ export default function DashboardPage() {
             <h1 className="text-2xl font-bold">{t.dashTitle}</h1>
             <p className="text-sm text-[#71717a]">{t.dashDesc}</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Current tier chip + upgrade nudge. Free → grey badge with
+                prominent "Nâng cấp" link; Pro/Max → coloured badge as
+                a non-actionable status. */}
+            {tier === "free" ? (
+              <Link
+                href="/pricing"
+                title="Xem các gói trả phí + nhập mã khuyến mãi"
+                className="text-xs rounded-lg px-3 py-1.5 font-medium border border-[#7c3aed]/30 bg-gradient-to-r from-[#7c3aed]/[0.06] to-[#a855f7]/[0.06] text-[#7c3aed] hover:from-[#7c3aed]/[0.12] hover:to-[#a855f7]/[0.12] transition-colors"
+              >
+                Gói Free · Nâng cấp →
+              </Link>
+            ) : (
+              <span
+                title="Gói hiện tại — quản lý subscription qua PayPal"
+                className={`text-xs rounded-lg px-3 py-1.5 font-medium border ${
+                  tier === "pro"
+                    ? "border-amber-200 bg-amber-50 text-amber-700"
+                    : "border-violet-200 bg-violet-50 text-violet-700"
+                }`}
+              >
+                {tier === "pro" ? "★ Pro" : "✦ Max"}
+              </span>
+            )}
             {/* Only show after connection — lazy pattern. Disconnected users
                 discover Google integration via the form auto-create flow, not
                 via header CTAs cluttering the dashboard. */}

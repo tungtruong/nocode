@@ -14,6 +14,49 @@ export default function PricingPage() {
   const router = useRouter();
   const [busyTier, setBusyTier] = useState<PlanTier | null>(null);
   const [err, setErr] = useState("");
+  const [redeemOpen, setRedeemOpen] = useState(false);
+  const [redeemCode, setRedeemCode] = useState("");
+  const [redeemBusy, setRedeemBusy] = useState(false);
+  const [redeemMsg, setRedeemMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  const submitRedeem = async () => {
+    const code = redeemCode.trim();
+    if (!code) return;
+    setRedeemBusy(true);
+    setRedeemMsg(null);
+    try {
+      const r = await fetch("/api/redeem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (r.status === 401) {
+        router.push(`/login?redirect=/pricing`);
+        return;
+      }
+      const d = await r.json();
+      if (!r.ok) {
+        setRedeemMsg({ kind: "err", text: d.error || t.pricingRedeemError });
+      } else {
+        setRedeemMsg({
+          kind: "ok",
+          text: t.pricingRedeemSuccess
+            .replace("{tier}", d.tier)
+            .replace("{days}", String(d.daysGranted)),
+        });
+        setRedeemCode("");
+        // Close + bounce to dashboard so the user sees their new tier badge.
+        setTimeout(() => {
+          setRedeemOpen(false);
+          router.push("/dashboard");
+        }, 1800);
+      }
+    } catch {
+      setRedeemMsg({ kind: "err", text: t.pricingRedeemError });
+    } finally {
+      setRedeemBusy(false);
+    }
+  };
 
   const PLANS: Array<{
     tier: PlanTier;
@@ -165,6 +208,16 @@ export default function PricingPage() {
           })}
         </div>
 
+        <div className="mt-6 text-center">
+          <button
+            type="button"
+            onClick={() => { setRedeemMsg(null); setRedeemOpen(true); }}
+            className="text-xs text-[#7c3aed] hover:text-[#6d28d9] hover:underline font-medium"
+          >
+            {t.pricingRedeemLink}
+          </button>
+        </div>
+
         <div className="mt-8 mx-auto max-w-3xl space-y-3 text-left">
           <div className="rounded-xl border border-[#7c3aed]/20 bg-[#7c3aed]/[0.03] px-4 py-3 text-xs text-[#52525b] leading-relaxed">
             💡 {t.pricingCacheNote}
@@ -196,6 +249,52 @@ export default function PricingPage() {
           <Link href="/" className="hover:text-[#71717a] transition-colors">{t.home}</Link>
         </div>
       </footer>
+
+      {redeemOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setRedeemOpen(false)}
+        >
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-base font-semibold text-[#0f172a] mb-1">{t.pricingRedeemTitle}</h2>
+            <p className="text-xs text-[#52525b] mb-4">{t.pricingRedeemDesc}</p>
+            <input
+              type="text"
+              value={redeemCode}
+              onChange={(e) => setRedeemCode(e.target.value.toUpperCase())}
+              placeholder={t.pricingRedeemPlaceholder}
+              className="w-full rounded-xl border border-[#e8e8ec] px-4 py-2.5 text-sm font-mono tracking-wider uppercase focus:border-[#7c3aed] focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/10"
+              autoFocus
+              maxLength={32}
+              onKeyDown={(e) => { if (e.key === "Enter" && !redeemBusy) submitRedeem(); }}
+            />
+            {redeemMsg && (
+              <div className={`mt-3 rounded-lg px-3 py-2 text-xs ${
+                redeemMsg.kind === "ok"
+                  ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border border-red-200 bg-red-50 text-red-600"
+              }`}>
+                {redeemMsg.text}
+              </div>
+            )}
+            <div className="mt-4 flex gap-2 justify-end">
+              <button
+                onClick={() => setRedeemOpen(false)}
+                className="rounded-lg px-4 py-2 text-sm text-[#64748b] hover:bg-[#fafafa]"
+              >
+                {t.pricingRedeemCancel}
+              </button>
+              <button
+                onClick={submitRedeem}
+                disabled={redeemBusy || !redeemCode.trim()}
+                className="rounded-lg bg-[#7c3aed] text-white px-4 py-2 text-sm font-medium hover:bg-[#6d28d9] disabled:opacity-50"
+              >
+                {redeemBusy ? "..." : t.pricingRedeemSubmit}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
