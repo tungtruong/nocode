@@ -600,6 +600,21 @@ export default function BuilderPage() {
     openProject(found);
   }, [projectIdFromUrl, savedProjects, appId, openProject]);
 
+  // Open builder with a prefilled prompt from ?prompt=<text>. Used by the
+  // landing page's example-chip CTAs so a click drops the user straight into
+  // a primed conversation. We also seed an app id so the very next send()
+  // is treated as an edit-able project, not a throwaway.
+  const promptFromUrl = searchParams.get("prompt");
+  const promptLoadedRef = useRef(false);
+  useEffect(() => {
+    if (promptLoadedRef.current || !promptFromUrl || appId) return;
+    promptLoadedRef.current = true;
+    setAppId(Date.now().toString(36));
+    setAppName(promptFromUrl.slice(0, 40));
+    setInput(promptFromUrl.slice(0, 500));
+    setMobileTab("chat");
+  }, [promptFromUrl, appId]);
+
   // Show "New App" or "Open Project" screen when no project loaded
   if (!appId) {
     return (

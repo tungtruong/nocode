@@ -20,19 +20,44 @@ export const t = {
     deployLatest: "Deploy",
 
     // Landing
-    heroTag: "Tạo app bằng AI",
-    heroTitle: "Dựng app",
-    heroHighlight: "không cần code",
-    heroDesc: "Mô tả ý tưởng bằng ngôn ngữ tự nhiên. Xem AI dựng app từng nút một theo thời gian thực. Không cần biết lập trình.",
-    heroCTA: "Bắt đầu miễn phí",
+    heroTag: "AI builder cho mọi loại web app",
+    heroTitle: "Mô tả ý tưởng —",
+    heroHighlight: "có ngay app web trong 60 giây",
+    heroDesc: "Menu QR, thiệp cưới, landing page, pitch deck, CV, hay bất kỳ app nào — chỉ cần gõ tiếng Việt. AI dựng xong, deploy trực tiếp tới subdomain riêng.",
+    heroCTA: "Dựng app miễn phí",
     heroPricing: "Xem bảng giá",
-    feature1Title: "Chat là có app",
-    feature1Desc: "Mô tả app bằng lời — AI dựng code ngay lập tức.",
-    feature2Title: "Xem trực tiếp",
-    feature2Desc: "Từng nút bấm, từng dòng chữ hiện ra theo thời gian thực khi AI viết code.",
-    feature3Title: "Deploy một chạm",
-    feature3Desc: "App tự động lên sóng. Gửi link cho bạn bè dùng ngay.",
-    footerTag: "Dựng bằng JustVibe. Không cần code để làm ra công cụ này.",
+    heroChipsLabel: "Hoặc thử ngay với:",
+    heroChip1: "🍽 Menu QR cafe Highland",
+    heroChip2: "💍 Thiệp cưới có countdown",
+    heroChip3: "🚀 Landing khóa học SEO",
+    heroChip4: "📄 CV cho dev senior",
+
+    statsLabel: "Đang dùng để dựng",
+    statsApps: "app",
+    statsActive: "loại",
+    statsMode: "template chuyên dụng",
+
+    showcaseTitle: "6 loại app sẵn sàng dựng",
+    showcaseSub: "AI tự nhận diện ý định từ câu mô tả, chọn template phù hợp, điền nội dung phong cách Việt.",
+
+    howTitle: "Cách hoạt động",
+    howSub: "3 bước từ ý tưởng đến link chia sẻ",
+    how1Title: "1. Mô tả ý tưởng",
+    how1Desc: "Gõ tiếng Việt như nói chuyện — \"Tạo menu cafe có nút đặt qua Zalo\", AI hiểu ngay.",
+    how2Title: "2. AI dựng + bạn chỉnh",
+    how2Desc: "Preview hiện ngay khi AI viết. Yêu cầu chỉnh \"đổi màu nền tím\" hay \"thêm gallery ảnh\" — sửa tại chỗ.",
+    how3Title: "3. Deploy + chia sẻ",
+    how3Desc: "Một cú click. App lên ngay tại tên-bạn-chọn.justvibe.me. Mỗi lần cập nhật ghi đè link cũ.",
+
+    pricingTeaserTitle: "Giá đơn giản",
+    pricingTeaserSub: "Miễn phí thử ý tưởng. $14.99 cho creator. $39.99 cho power user.",
+    pricingTeaserCTA: "Xem chi tiết",
+
+    finalCTATitle: "Sẵn sàng dựng app đầu tiên?",
+    finalCTASub: "Miễn phí — không cần thẻ. Đăng nhập Google là dùng.",
+    finalCTABtn: "Bắt đầu ngay",
+
+    footerTag: "Dựng bằng JustVibe — chính trang này không cần một dòng code.",
 
     // Login
     loginTitle: "Đăng nhập",
@@ -280,19 +305,44 @@ export const t = {
     deployLatest: "Deploy",
 
     // Landing
-    heroTag: "AI-powered app builder",
-    heroTitle: "Build apps",
-    heroHighlight: "without code",
-    heroDesc: "Describe your idea in plain language. Watch the AI build your app in real-time, piece by piece. No coding required.",
-    heroCTA: "Start building free",
+    heroTag: "AI builder for every kind of web app",
+    heroTitle: "Describe your idea —",
+    heroHighlight: "get a live web app in 60 seconds",
+    heroDesc: "QR menus, wedding invites, landing pages, pitch decks, CVs, or anything else — just type. AI builds it, deploys to your own subdomain.",
+    heroCTA: "Build free",
     heroPricing: "View pricing",
-    feature1Title: "Chat to create",
-    feature1Desc: "Describe your app in natural language — the AI builds it instantly.",
-    feature2Title: "Live preview",
-    feature2Desc: "See every button and element appear in real-time as AI generates.",
-    feature3Title: "One-click deploy",
-    feature3Desc: "Your app goes live automatically. Share the link with anyone.",
-    footerTag: "Built without code. AI-powered.",
+    heroChipsLabel: "Or try one now:",
+    heroChip1: "🍽 QR menu for a cafe",
+    heroChip2: "💍 Wedding invite with countdown",
+    heroChip3: "🚀 Landing page for a course",
+    heroChip4: "📄 CV for a senior dev",
+
+    statsLabel: "Currently used to build",
+    statsApps: "apps",
+    statsActive: "modes",
+    statsMode: "specialized templates",
+
+    showcaseTitle: "6 modes ready to ship",
+    showcaseSub: "AI detects intent from your first message, picks the right template, fills in content.",
+
+    howTitle: "How it works",
+    howSub: "3 steps from idea to share link",
+    how1Title: "1. Describe the idea",
+    how1Desc: "Type like you'd say it — \"a cafe menu with a Zalo order button\" — the AI gets it.",
+    how2Title: "2. AI builds, you tweak",
+    how2Desc: "Preview shows up as the AI writes. Ask to \"make the background purple\" or \"add a photo gallery\" — edits happen in place.",
+    how3Title: "3. Deploy + share",
+    how3Desc: "One click. Live at your-chosen-name.justvibe.me. Every update overwrites the same link.",
+
+    pricingTeaserTitle: "Simple pricing",
+    pricingTeaserSub: "Free to try the idea. $14.99 for creators. $39.99 for power users.",
+    pricingTeaserCTA: "See full pricing",
+
+    finalCTATitle: "Ready to ship your first app?",
+    finalCTASub: "Free — no card needed. Sign in with Google and go.",
+    finalCTABtn: "Start now",
+
+    footerTag: "Built with JustVibe — this page itself didn't take a single line of code.",
 
     // Login
     loginTitle: "Welcome back",
