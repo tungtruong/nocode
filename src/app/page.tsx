@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useLang, LangToggle } from "@/components/LangProvider";
 import { APP_MODES, type ModeId } from "@/lib/modes";
 
@@ -21,6 +23,14 @@ const MODE_COLORS: Record<ModeId, { from: string; to: string; ring: string }> = 
 
 export default function LandingPage() {
   const { t } = useLang();
+  const router = useRouter();
+  const [prompt, setPrompt] = useState("");
+
+  const submit = () => {
+    const v = prompt.trim();
+    if (!v) return;
+    router.push(chipHref(v));
+  };
 
   const CHIPS = [t.heroChip1, t.heroChip2, t.heroChip3, t.heroChip4];
 
@@ -71,35 +81,71 @@ export default function LandingPage() {
           />
         </div>
 
-        <div className="relative z-10 mx-auto max-w-4xl px-4 sm:px-6 pt-12 sm:pt-20 pb-16 sm:pb-24 text-center">
-          <div className="mb-5 sm:mb-6 inline-flex items-center gap-2 rounded-full border border-[#e8e8ec] bg-white/80 backdrop-blur px-3 sm:px-4 py-1.5 shadow-sm">
+        <div className="relative z-10 mx-auto max-w-3xl px-4 sm:px-6 pt-10 sm:pt-16 pb-14 sm:pb-20 text-center">
+          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[#e8e8ec] bg-white/80 backdrop-blur px-3 sm:px-4 py-1.5 shadow-sm">
             <span className="h-1.5 w-1.5 rounded-full bg-[#7c3aed] animate-pulse" />
             <span className="text-[11px] sm:text-xs text-[#52525b] font-medium">{t.heroTag}</span>
           </div>
-          <h1 className="text-4xl sm:text-5xl lg:text-7xl font-bold leading-[1.05] tracking-tight">
-            {t.heroTitle}<br />
+          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold leading-[1.1] tracking-tight">
+            {t.heroTitle}{" "}
             <span className="bg-gradient-to-r from-[#7c3aed] via-[#a855f7] to-[#3b82f6] bg-clip-text text-transparent">{t.heroHighlight}</span>
           </h1>
-          <p className="mx-auto mt-5 sm:mt-7 max-w-2xl text-sm sm:text-base text-[#3f3f46] leading-relaxed">{t.heroDesc}</p>
-          <div className="mt-8 sm:mt-10 flex flex-col sm:flex-row items-center justify-center gap-3 px-4">
-            <Link href="/builder" className="w-full sm:w-auto rounded-2xl bg-[#18181b] px-8 py-3.5 text-sm font-semibold text-white hover:bg-[#27272a] transition-all shadow-xl shadow-black/10 text-center">{t.heroCTA}</Link>
-            <Link href="/pricing" className="w-full sm:w-auto rounded-2xl border border-[#e8e8ec] bg-white/80 backdrop-blur px-8 py-3.5 text-sm font-medium text-[#52525b] hover:text-[#18181b] hover:border-[#d4d4d8] transition-all text-center">{t.heroPricing}</Link>
-          </div>
 
-          {/* Sample-prompt chips */}
-          <div className="mt-12 flex flex-col items-center gap-3">
-            <p className="text-[11px] uppercase tracking-wider text-[#71717a] font-semibold">{t.heroChipsLabel}</p>
-            <div className="flex flex-wrap items-center justify-center gap-2 max-w-3xl">
+          {/* Lovable-style: the input IS the hero CTA. Type → submit →
+              builder opens with prompt prefilled. Below: chips fill the
+              input on click so "type and go" stays one-click for beginners. */}
+          <div className="mt-8 sm:mt-10 mx-auto max-w-2xl">
+            <div className="rounded-2xl bg-white shadow-xl shadow-black/5 ring-1 ring-[#e8e8ec] p-2 flex items-center gap-2">
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    submit();
+                  }
+                }}
+                placeholder={t.heroInputPlaceholder}
+                rows={2}
+                className="flex-1 resize-none bg-transparent px-4 py-3 text-sm text-[#18181b] placeholder:text-[#94a3b8] focus:outline-none"
+                maxLength={500}
+              />
+              <button
+                onClick={submit}
+                disabled={!prompt.trim()}
+                className="rounded-xl bg-[#18181b] text-white px-5 py-3 text-sm font-semibold hover:bg-[#27272a] disabled:opacity-40 disabled:cursor-not-allowed transition shrink-0"
+                aria-label="Submit"
+              >
+                ↑
+              </button>
+            </div>
+
+            {/* Chip row directly under input — click fills the input. */}
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
               {CHIPS.map((label) => (
-                <Link
+                <button
                   key={label}
-                  href={chipHref(label.replace(/^[^\s]+\s/, ""))}
-                  className="rounded-full border border-[#e8e8ec] bg-white/90 backdrop-blur px-4 py-2 text-xs font-medium text-[#52525b] hover:border-[#7c3aed]/40 hover:bg-[#7c3aed]/[0.06] hover:text-[#7c3aed] hover:shadow-md hover:-translate-y-0.5 transition-all"
+                  onClick={() => setPrompt(label.replace(/^[^\s]+\s/, ""))}
+                  className="rounded-full border border-[#e8e8ec] bg-white/80 backdrop-blur px-3.5 py-1.5 text-xs font-medium text-[#52525b] hover:border-[#7c3aed]/40 hover:bg-[#7c3aed]/[0.06] hover:text-[#7c3aed] transition-all"
                 >
                   {label}
-                </Link>
+                </button>
               ))}
             </div>
+            <p className="mt-3 text-[11px] text-[#94a3b8]">
+              {t.heroDesc}
+            </p>
+          </div>
+
+          {/* Secondary CTAs sit below — they don't compete with the input. */}
+          <div className="mt-8 flex items-center justify-center gap-4 text-xs">
+            <Link href="/pricing" className="text-[#71717a] hover:text-[#18181b] transition-colors">
+              {t.heroPricing} →
+            </Link>
+            <span className="text-[#cbd5e1]">·</span>
+            <Link href="/login" className="text-[#71717a] hover:text-[#18181b] transition-colors">
+              {t.signin}
+            </Link>
           </div>
         </div>
       </section>
