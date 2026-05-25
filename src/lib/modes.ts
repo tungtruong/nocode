@@ -104,7 +104,7 @@ main{max-width:600px;margin:0 auto;padding:20px}
 .item{display:flex;justify-content:space-between;align-items:flex-start;padding:14px;background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:10px;gap:12px;cursor:pointer;transition:transform .15s}
 .item:active{transform:scale(.98)}
 .item h3{font-size:16px;margin-bottom:4px}
-.item p{font-size:13px;color:var(--muted);margin-bottom:6px}
+.item p{font-size:14px;color:var(--muted);margin-bottom:6px;line-height:1.4}
 .item .price{color:var(--primary);font-weight:600;white-space:nowrap}
 .order-btn{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--primary);color:#fff;padding:14px 32px;border-radius:999px;text-decoration:none;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.2);display:flex;align-items:center;gap:8px}
 .cart-count{background:rgba(255,255,255,.25);padding:2px 8px;border-radius:999px;font-size:13px}
@@ -166,7 +166,7 @@ section{padding:60px 24px;text-align:center;max-width:720px;margin:0 auto}
 .gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:24px}
 .gallery img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px}
 form{display:flex;flex-direction:column;gap:12px;max-width:400px;margin:24px auto 0}
-input,select,button{padding:12px;border:1px solid #ddd;border-radius:6px;font-size:14px;font-family:inherit}
+input,select,button{padding:14px;border:1px solid #ddd;border-radius:8px;font-size:16px;font-family:inherit;min-height:48px}
 button{background:var(--primary);color:#fff;border:0;cursor:pointer;font-weight:600}
 .section-title{font-family:'Playfair Display',Georgia,serif;font-style:italic;font-size:32px;color:var(--primary);margin-bottom:24px}
 </style>
@@ -245,8 +245,8 @@ section{padding:80px 24px;max-width:1100px;margin:0 auto}
 .cta-section h2{font-size:32px;margin-bottom:12px;color:#fff}
 .cta-section p{opacity:.9;margin-bottom:24px}
 .cta-form{display:flex;gap:8px;max-width:440px;margin:0 auto;flex-wrap:wrap;justify-content:center}
-.cta-form input{flex:1;min-width:200px;padding:14px;border:0;border-radius:8px;font-size:15px}
-.cta-form button{background:#000;color:#fff;border:0;padding:14px 24px;border-radius:8px;font-weight:600;cursor:pointer}
+.cta-form input{flex:1;min-width:200px;padding:14px 16px;border:0;border-radius:8px;font-size:16px;min-height:48px}
+.cta-form button{background:#000;color:#fff;border:0;padding:14px 24px;border-radius:8px;font-weight:600;cursor:pointer;font-size:16px;min-height:48px}
 footer{text-align:center;color:var(--muted);padding:32px 24px;border-top:1px solid #eee;font-size:14px}
 </style>
 </head>
@@ -355,7 +355,7 @@ header.top{display:flex;justify-content:space-between;align-items:flex-start;mar
 .contact{display:flex;gap:16px;flex-wrap:wrap;font-size:14px;color:var(--muted)}
 .contact span{display:flex;align-items:center;gap:6px}
 .controls{display:flex;gap:8px}
-.controls button{background:transparent;border:1px solid var(--border);color:var(--text);padding:8px 14px;border-radius:6px;cursor:pointer;font-size:13px}
+.controls button{background:transparent;border:1px solid var(--border);color:var(--text);padding:12px 18px;border-radius:8px;cursor:pointer;font-size:14px;min-height:44px}
 .controls button:hover{background:var(--primary);color:#fff;border-color:var(--primary)}
 section.cv{margin-top:28px}
 section.cv > h2{font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--primary);margin-bottom:14px}

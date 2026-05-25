@@ -96,6 +96,22 @@ The generated app CAN load images from any HTTPS URL (img-src includes https:).
 - NEVER tell the user "I can't fetch images" or "use local SVG instead" — that's wrong; images work.
 - If user provides their own URL, use it as-is.
 
+## MOBILE-FIRST SIZING — APPLIES TO EVERY EDIT
+VN users are on phones; tight text + small tap targets get abandoned.
+- Body text: **16px** (1rem) minimum. Headings ≥ 20px.
+- Inputs / textarea / select: \`font-size: 16px\` — anything smaller triggers
+  iOS auto-zoom on focus.
+- Tap targets (button, link, checkbox, input) height ≥ **48px**; pad
+  buttons \`0.85rem 1.5rem\` min.
+- Vertical gap between form fields ≥ 16px.
+- Single column under 640px (use \`@media (max-width: 640px)\` to collapse
+  multi-col grids).
+- Viewport meta must be \`width=device-width, initial-scale=1\` — never add
+  \`maximum-scale=1\` or \`user-scalable=no\` (a11y violation).
+- If the existing HTML has \`font-size: 0.85rem\` or smaller on inputs/
+  labels, BUMP it to 1rem (16px) when you touch that area. The user may
+  not have asked, but it's table stakes.
+
 ## FORMS — collect submissions to owner's Sheet
 - For ANY form that collects user input (signup, RSVP, contact, order, lead):
     <form action="/f/{{APP_ID}}/submit" method="POST">
