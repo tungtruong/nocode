@@ -82,7 +82,7 @@ Empty-state requirement:
     const items = await jv.db.list('products', { limit: 24 });
     const grid = document.getElementById('grid');
     grid.innerHTML = items.length
-      ? items.map(p => \\\`<article>\${p.name} · \${p.price}</article>\\\`).join('')
+      ? items.map(p => \`<article>\${p.name} · \${p.price}</article>\`).join('')
       : '<p class="empty">Chưa có dữ liệu — chủ shop vào Dashboard để thêm sản phẩm.</p>';
   });
 

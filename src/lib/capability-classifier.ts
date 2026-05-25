@@ -9,10 +9,12 @@
 // every new feature pays. A single tiny LLM call (~50 in / ~30 out tokens)
 // covers everything for ~$0.00001 per request.
 //
-// Cost discipline: max_tokens 30, temperature 0, 6 second timeout. Failure
-// = "include everything" so we never break a generation over classifier
-// errors; the cost of an extra ~400 prompt tokens is far less than a missed
-// feature in the gen output.
+// Cost discipline: max_tokens 300 (DeepSeek's chat model now emits hidden
+// reasoning_content tokens before the visible answer — a tight budget gets
+// fully consumed by reasoning and returns empty content), temperature 0.
+// Failure = "include everything" so we never break a generation over
+// classifier errors; the cost of an extra ~400 prompt tokens in that
+// fallback is far less than a missed feature in the gen output.
 
 import { createCompletionWithFallback } from "./ai";
 import { recordUsage } from "./quota";
@@ -31,7 +33,7 @@ Rules:
 - 'auth' implies the app needs at least 'db' for the per-user data — include both if you pick auth.
 - Be CONSERVATIVE. When in doubt, return fewer capabilities. The model can always add later.
 
-Output: STRICT JSON only, one line, no prose:
+Output: STRICT JSON only, one line, no prose, no markdown fence. Must contain the word "json" in your understanding only — output is pure data:
   {"caps":["forms","db"]}
 
 Empty case:
@@ -81,11 +83,14 @@ export async function classifyCapabilities(
       {
         messages: [
           { role: "system", content: CLASSIFIER_PROMPT },
-          { role: "user", content: trimmed },
+          // DeepSeek's json_object mode silently returns empty content unless
+          // the literal word "json" appears in messages. Cheap & safe to put
+          // it here AND drop the response_format constraint — the parser
+          // below already tolerates loose formatting.
+          { role: "user", content: `${trimmed}\n\n(return strict JSON)` },
         ],
         temperature: 0,
-        max_tokens: 30,
-        response_format: { type: "json_object" },
+        max_tokens: 800,
       },
       (reason) => console.log(`[CAPS] fallback to OpenAI: ${reason}`),
     );
