@@ -20,12 +20,6 @@ interface Binding {
   updated_at: string;
 }
 
-interface SheetSummary {
-  spreadsheetId: string;
-  title: string;
-  url: string;
-}
-
 export default function IntegrationsPage() {
   const { t } = useLang();
   const searchParams = useSearchParams();
@@ -186,104 +180,26 @@ export default function IntegrationsPage() {
   );
 }
 
-function SheetPicker({ bindings, reload }: { bindings: Binding[]; reload: () => Promise<void> }) {
-  const { t } = useLang();
-  const [sheets, setSheets] = useState<SheetSummary[]>([]);
-  const [loadingSheets, setLoadingSheets] = useState(true);
-  const [newTitle, setNewTitle] = useState("");
-  const [newHeaders, setNewHeaders] = useState("name, email");
-  const [creating, setCreating] = useState(false);
-  const [err, setErr] = useState("");
-
-  useEffect(() => {
-    fetch("/api/sheet/list")
-      .then((r) => r.json())
-      .then((d) => setSheets(d.sheets || []))
-      .catch(() => setErr("Không tải được danh sách"))
-      .finally(() => setLoadingSheets(false));
-  }, []);
-
-  const createNew = async () => {
-    if (!newTitle.trim()) return;
-    setCreating(true);
-    setErr("");
-    try {
-      const headers = newHeaders.split(",").map((h) => h.trim()).filter(Boolean);
-      const r = await fetch("/api/sheet/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: newTitle.trim(), headers }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "Tạo thất bại");
-      setSheets((p) => [{ spreadsheetId: d.spreadsheetId, title: newTitle.trim(), url: d.url }, ...p]);
-      setNewTitle("");
-      await reload();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Lỗi");
-    } finally {
-      setCreating(false);
-    }
-  };
-
+function SheetPicker({ bindings }: { bindings: Binding[]; reload: () => Promise<void> }) {
+  // Light-touch panel: post-connect, all we want to do here is reassure the
+  // user the link is alive + point them at where the actual bind happens
+  // (per-app from /dashboard/forms/<id>, primarily via auto-create).
   return (
     <div className="mt-5 border-t border-[#f1f5f9] pt-4">
-      <div className="flex items-baseline justify-between mb-2">
-        <h3 className="text-sm font-semibold text-[#18181b]">
-          Sheets trong Drive của bạn ({sheets.length})
-        </h3>
-        <span className="text-[10px] text-[#94a3b8]" title="Chỉ hiển thị sheet đã được mở/tạo qua JustVibe (drive.file scope)">
-          ⓘ chỉ thấy file đã chia sẻ với JV
-        </span>
-      </div>
-      {loadingSheets ? (
-        <p className="text-xs text-[#94a3b8]">Đang tải...</p>
-      ) : (
-        <ul className="space-y-1 max-h-48 overflow-y-auto">
-          {sheets.map((s) => (
-            <li key={s.spreadsheetId} className="flex items-center justify-between text-xs py-1">
-              <span className="text-[#52525b] truncate flex-1 mr-2">📄 {s.title}</span>
-              <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-[#7c3aed] hover:underline shrink-0">Mở ↗</a>
-            </li>
-          ))}
-          {sheets.length === 0 && (
-            <li className="text-xs text-[#94a3b8]">Chưa có sheet nào trong scope — tạo mới bên dưới (sẽ tự động cấp quyền).</li>
-          )}
-        </ul>
-      )}
-
-      <div className="mt-4 rounded-xl border border-[#e8e8ec] bg-[#fafafa] p-3 space-y-2">
-        <h4 className="text-xs font-semibold text-[#18181b]">{t.integrationsCreateNew}</h4>
-        <p className="text-[11px] text-[#71717a] -mt-1">Sheet sẽ được tạo trong Drive của bạn — JustVibe không giữ bản copy.</p>
-        <input
-          type="text"
-          value={newTitle}
-          onChange={(e) => setNewTitle(e.target.value)}
-          placeholder={t.integrationsNewSheetTitle}
-          className="w-full rounded-lg border border-[#e8e8ec] bg-white px-3 py-2 text-xs"
-        />
-        <input
-          type="text"
-          value={newHeaders}
-          onChange={(e) => setNewHeaders(e.target.value)}
-          placeholder={t.integrationsNewSheetHeaders}
-          className="w-full rounded-lg border border-[#e8e8ec] bg-white px-3 py-2 text-xs font-mono"
-        />
-        <button
-          onClick={createNew}
-          disabled={creating || !newTitle.trim()}
-          className="w-full rounded-lg bg-[#18181b] text-white py-2 text-xs font-medium hover:bg-[#27272a] disabled:opacity-50"
-        >
-          {creating ? "Đang tạo..." : t.integrationsCreateNew}
-        </button>
-        {err && <p className="text-xs text-red-600">{err}</p>}
-      </div>
-
-      {bindings.length === 0 && (
-        <p className="mt-4 text-xs text-[#94a3b8]">
-          💡 Để bind sheet với 1 app cụ thể, mở app trong builder rồi bind từ đó (chức năng đang ship tuần 2).
+      <div className="rounded-xl border border-[#e8e8ec] bg-[#fafafa] p-3 text-xs text-[#52525b] space-y-2">
+        <p>
+          ✅ Đã sẵn sàng. Sheet được tạo + bind <strong>tự động</strong> khi bạn deploy app có form.
         </p>
-      )}
+        <p className="text-[#71717a]">
+          Vào <a href="/dashboard" className="text-[#7c3aed] hover:underline">dashboard</a> →
+          chọn app → &ldquo;Form submissions&rdquo; → bấm <em>✨ Tạo sheet & bind tự động</em>. JustVibe sẽ đọc form trong app và tạo sheet với cột khớp đúng.
+        </p>
+        {bindings.length > 0 && (
+          <p className="text-[#71717a]">
+            Đã bind {bindings.length} app — xem chi tiết ở phần bên dưới.
+          </p>
+        )}
+      </div>
     </div>
   );
 }
