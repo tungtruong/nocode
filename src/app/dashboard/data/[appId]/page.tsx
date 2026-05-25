@@ -811,22 +811,22 @@ export default function DataPage({ params }: { params: Promise<{ appId: string }
           <div className="rounded-2xl border border-[#e8e8ec] bg-[#fafafa] p-5 text-xs text-[#52525b] space-y-2">
             <h4 className="text-sm font-semibold text-[#18181b]">Hướng dẫn DNS</h4>
             <p>
-              Hoạt động với <b>mọi nhà cung cấp DNS</b> — Vinahost, Mat Bao, Tenten, GoDaddy, Namecheap, Cloudflare... Không cần proxy CDN, JustVibe tự cấp HTTPS qua Let&apos;s Encrypt.
+              Hoạt động với <b>mọi nhà cung cấp DNS</b> — Vinahost, Mat Bao, Tenten, GoDaddy, Namecheap, Cloudflare... Cloudflare for SaaS xử lý SSL + CDN tự động.
             </p>
             <p>
               <b>1.</b> Login vào nhà cung cấp DNS của bạn. Thêm CNAME record:
             </p>
             <pre className="bg-white border border-[#e8e8ec] rounded p-2 font-mono text-[11px] overflow-x-auto">
 {`Type:   CNAME
-Name:   shop                ← subdomain bạn muốn
-Target: proxy.justvibe.me
+Name:   shop                  ← subdomain bạn muốn
+Target: customers.justvibe.me
 TTL:    Auto (hoặc 300)`}
             </pre>
             <p>
-              <b>2.</b> Đợi 1-5 phút để DNS propagate. Bấm <b>Verify</b> ở trên — JV check CNAME thật + bật routing.
+              <b>2.</b> Đợi 1-5 phút để DNS propagate. Bấm <b>Verify</b> ở trên — JV check trạng thái với Cloudflare. Khi cert được cấp (~30-120s), domain status đổi sang ✓ Verified.
             </p>
             <p>
-              <b>3.</b> Lần đầu khách truy cập <code>https://shop.example.com</code>, JV tự xin cert Let&apos;s Encrypt trong ~30 giây. Sau đó cache + auto-renew. Không tốn phí, không cần config gì thêm.
+              <b>3.</b> Truy cập <code>https://shop.example.com</code> — Cloudflare phục vụ qua edge global với HTTPS tự động, free 100 domain đầu tiên.
             </p>
             <p className="text-amber-700">
               ⚠ Apex domain (vd <code>example.com</code> không có subdomain) hiện chưa support — DNS provider phổ thông không cho CNAME ở root. Dùng subdomain (<code>www.</code>, <code>shop.</code>, ...).

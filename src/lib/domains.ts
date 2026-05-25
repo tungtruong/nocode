@@ -9,13 +9,13 @@
 // covers 99% of VN SMB customers already.
 
 import { getDb } from "@/lib/db";
-import { promises as dns } from "dns";
 
 export interface CustomDomain {
   domain: string;
   app_id: string;
   user_email: string;
   verified_at: string | null;
+  cf_hostname_id: string | null;
   created_at: string;
 }
 
@@ -62,10 +62,21 @@ export function countDomainsForOwner(userEmail: string): number {
   return row.n;
 }
 
-export function addDomain(domain: string, appId: string, userEmail: string): void {
+export function addDomain(
+  domain: string,
+  appId: string,
+  userEmail: string,
+  cfHostnameId: string | null = null,
+): void {
   getDb()
-    .prepare("INSERT INTO custom_domains (domain, app_id, user_email) VALUES (?, ?, ?)")
-    .run(normalizeDomain(domain), appId, userEmail.toLowerCase());
+    .prepare("INSERT INTO custom_domains (domain, app_id, user_email, cf_hostname_id) VALUES (?, ?, ?, ?)")
+    .run(normalizeDomain(domain), appId, userEmail.toLowerCase(), cfHostnameId);
+}
+
+export function setCfHostnameId(domain: string, cfHostnameId: string): void {
+  getDb()
+    .prepare("UPDATE custom_domains SET cf_hostname_id = ? WHERE domain = ?")
+    .run(cfHostnameId, normalizeDomain(domain));
 }
 
 export function markVerified(domain: string): void {
@@ -80,25 +91,7 @@ export function removeDomain(domain: string): void {
     .run(normalizeDomain(domain));
 }
 
-/**
- * Resolve the CNAME chain for a domain and check that it eventually points
- * at one of our accepted targets. We accept any *.justvibe.me as a valid
- * target — the actual slug doesn't have to match the saved app's slug
- * (some users will point multiple custom domains at the same app).
- *
- * Returns the resolved target(s) on success so the UI can show what we
- * actually saw, or null when verification fails.
- */
-export async function verifyCnamePointsToUs(domain: string): Promise<string[] | null> {
-  const target = normalizeDomain(domain);
-  try {
-    const records = await dns.resolveCname(target);
-    const ok = records.some((r) => r.toLowerCase().endsWith(".justvibe.me") || r.toLowerCase() === "justvibe.me");
-    return ok ? records : null;
-  } catch {
-    // No CNAME — try A/AAAA falling back to "doesn't point at us, but if user
-    // ran their own reverse proxy and added a custom Host header it'd still
-    // work". For now we strictly require CNAME → simpler error message.
-    return null;
-  }
-}
+// CNAME verification moved to the CF SaaS path — /api/domains/verify polls
+// Cloudflare's custom-hostname status instead of doing a DNS lookup here.
+// CF resolves the CNAME chain as part of cert issuance, so once their status
+// flips to "active" we know DNS is good.

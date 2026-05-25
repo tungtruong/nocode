@@ -139,21 +139,32 @@ function migrate(db: Database.Database) {
     );
 
     -- Custom domains. Owners point their own domain (e.g. shop.example.com)
-    -- via CNAME to <slug>.justvibe.me; the proxy resolves Host header → app_id
-    -- and rewrites internally. SSL is handled by the user's CDN (Cloudflare
-    -- orange-cloud proxy recommended in the dashboard instructions).
+    -- at us via CNAME → customers.justvibe.me. SSL is handled by Cloudflare
+    -- for SaaS — when a domain row is inserted we POST to CF's custom
+    -- hostnames API; CF auto-issues a Let's Encrypt cert via HTTP-01 and
+    -- starts proxying traffic through CF edge to our origin.
+    --   cf_hostname_id  — Cloudflare's UUID for the hostname; needed to
+    --                     DELETE the hostname when the owner removes the
+    --                     domain (without it we leak quota slots in CF).
     CREATE TABLE IF NOT EXISTS custom_domains (
-      domain      TEXT PRIMARY KEY,
-      app_id      TEXT NOT NULL,
-      user_email  TEXT NOT NULL COLLATE NOCASE,
-      verified_at TEXT,
-      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      domain          TEXT PRIMARY KEY,
+      app_id          TEXT NOT NULL,
+      user_email      TEXT NOT NULL COLLATE NOCASE,
+      verified_at     TEXT,
+      cf_hostname_id  TEXT,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS custom_domains_owner_idx
       ON custom_domains(user_email, created_at DESC);
     CREATE INDEX IF NOT EXISTS custom_domains_app_idx
       ON custom_domains(app_id);
   `);
+
+  // Sniff for legacy rows missing cf_hostname_id (added after the first ship).
+  const cdCols = db.prepare("PRAGMA table_info(custom_domains)").all() as Array<{ name: string }>;
+  if (!cdCols.some((c) => c.name === "cf_hostname_id")) {
+    db.exec("ALTER TABLE custom_domains ADD COLUMN cf_hostname_id TEXT");
+  }
 
   // ALTER for tables that pre-existed before the `tier` column was introduced.
   // SQLite has no IF NOT EXISTS on ALTER, so we sniff PRAGMA table_info first.

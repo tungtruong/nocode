@@ -1,120 +1,112 @@
-# Custom domains with auto-issued HTTPS
+# Custom domains via Cloudflare for SaaS
 
-Customers can point their own domain (e.g. `shop.khachhang.com`) at their
-JustVibe app from **any DNS provider** — Vinahost, Mat Bao, Tenten, GoDaddy,
-Namecheap, Z.com, you name it. No Cloudflare account required.
+Customers can point any domain (e.g. `shop.khachhang.com`) at their
+JustVibe app from **any DNS provider** — Vinahost, Mat Bao, Tenten,
+GoDaddy, Namecheap, Z.com. They CNAME to `customers.justvibe.me` and
+Cloudflare for SaaS handles everything: cert issuance, edge caching,
+DDoS shielding. SSL is free up to 100 custom hostnames, $0.10/hostname
+beyond.
 
-This works because the JustVibe VPS runs Caddy in front of Next.js. Caddy
-auto-issues a Let's Encrypt certificate the first time someone visits a
-new domain, with the JustVibe API gating issuance to prevent abuse.
+Zero changes to the production nginx config. CF talks to the existing
+origin over the existing CF Origin Cert that nginx already terminates.
 
-## One-time DNS setup (the JustVibe apex zone)
+## One-time setup
 
-Before customers can CNAME at us, add a single A record in the DNS zone for
-`justvibe.me`:
+### 1. Enable Cloudflare for SaaS on the zone
+
+Cloudflare dashboard → `justvibe.me` zone → SSL/TLS → Custom Hostnames
+→ **Enable Cloudflare for SaaS** (free tier).
+
+Then create the fallback origin DNS record in the same zone:
 
 ```
-Type:  A
-Name:  proxy
-Value: <VPS-IP — 116.118.9.133 currently>
-TTL:   3600
+Type:    CNAME (or A pointing to VPS IP — works either way)
+Name:    customers
+Target:  justvibe.me      (or 116.118.9.133)
+Proxy:   ON (orange cloud — required, this is what gets the SaaS treatment)
+TTL:     Auto
 ```
 
-That gives us a stable target (`proxy.justvibe.me`) that all customer CNAMEs
-point at. If we later need to fail over to a new VPS, we only update this
-one A record and every customer domain follows automatically — no per-app
-DNS surgery.
+This `customers.justvibe.me` is what customer CNAMEs point at. CF
+resolves the chain → recognises it owns the destination → applies the
+SaaS proxy treatment → forwards HTTPS to the origin VPS.
 
-## One-time VPS setup (Vinahost / Ubuntu)
+### 2. Create an API token
 
-```bash
-# 1. Install Caddy from the official APT repo (signed packages, auto-updated)
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-  | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-  | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update
-sudo apt install -y caddy
+Cloudflare dashboard → My Profile → API Tokens → **Create Token**.
 
-# 2. Drop our Caddyfile in place
-sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+Permissions:
+- Zone → SSL and Certificates → Edit  (for `justvibe.me`)
+- Zone → Custom Hostnames → Edit       (for `justvibe.me`)
 
-# 3. Make sure ports 80 and 443 are open in the firewall
-sudo ufw allow 80,443/tcp
+Zone resources: Include → Specific zone → `justvibe.me`.
 
-# 4. If anything else is bound to 80/443 (nginx, apache, an old Caddy),
-#    stop+disable it first.
-sudo systemctl status nginx apache2 2>/dev/null
+Copy the token — it shows once.
 
-# 5. Reload Caddy — it picks up the new config + issues certs on demand
-sudo systemctl reload caddy
-sudo systemctl enable caddy
+### 3. Add env vars on the server
 
-# 6. (Optional) Tail Caddy's cert-issuance log to watch the first
-#    custom-domain hit work end-to-end:
-sudo journalctl -u caddy -f | grep -E 'obtained|ASK|tls'
+```
+CF_API_TOKEN=<the token from step 2>
+CF_ZONE_ID=<justvibe.me zone ID from dashboard → Overview → API section>
+CF_FALLBACK_HOSTNAME=customers.justvibe.me   # optional, defaults to this
 ```
 
-Next.js stays bound to `localhost:3002` (or wherever `npm start` listens).
-Caddy is the only public-facing listener.
+Add the same vars to the GH secret `DEPLOY_ENV` so they get rolled
+out on the next `gh workflow run deploy.yml`.
+
+Restart the JustVibe process. The dashboard's `🌐 Domain riêng` tab
+will start hitting CF's API for every add / verify / remove action.
 
 ## How a customer adds their domain
 
-From the customer's perspective:
+1. JustVibe → Dashboard → app → Dữ liệu → **🌐 Domain riêng**
+2. Type `shop.khachhang.com` → **Thêm**.
+3. JustVibe POSTs to CF `/zones/{zone}/custom_hostnames`; CF returns a
+   hostname ID + initial `pending` status. JustVibe saves the ID in
+   the `custom_domains.cf_hostname_id` column.
+4. Customer logs into their DNS provider, adds a single record:
+   ```
+   Type:    CNAME
+   Name:    shop
+   Target:  customers.justvibe.me
+   ```
+5. Wait 1–5 minutes for DNS to propagate, then click **Verify** in the
+   dashboard.
+6. JustVibe calls CF `GET /custom_hostnames/{id}`. When `status=active`
+   AND `ssl.status=active`, flips `verified_at` and the request proxy
+   (`src/proxy.ts`) starts routing requests for that hostname to the
+   correct app.
 
-1. In JustVibe → `Dashboard → app → Dữ liệu → 🌐 Domain riêng` tab,
-   add the domain (e.g. `shop.khachhang.com`).
-2. Login to their DNS provider, add a `CNAME` record:
-   - **Name**: the subdomain (`shop`)
-   - **Target**: `proxy.justvibe.me`
-3. Wait 1–5 minutes for DNS propagation, then back in the dashboard click
-   **Verify**. JustVibe does a live `dns.resolveCname(...)` to confirm the
-   record points at us, then flips `verified_at` and the proxy starts
-   routing requests for that domain.
-4. The first visitor to `https://shop.khachhang.com` triggers Caddy →
-   ACME → Let's Encrypt cert issuance (~10–30 s for the cold path).
-   Subsequent visitors use the cached cert. Renewal happens automatically
-   well before the 90-day expiry.
-
-## How the ask hook prevents abuse
-
-Caddy does NOT mint a certificate for every domain that resolves to us.
-Before each cold-path issuance it calls `https://justvibe.me/api/cert-ask`
-with `?domain=...`. The endpoint:
-
-- Returns **200** when the domain exists in the `custom_domains` SQLite
-  table — meaning a real owner added it via the dashboard.
-- Returns **403** otherwise.
-
-A `403` makes Caddy abort the issuance immediately. The Let's Encrypt
-rate-limit budget (50 certs/week per registered domain) is preserved for
-real customers.
-
-## Rate limit notes
-
-If a single customer rapidly adds + removes the same domain, we burn LE
-attempts. The Caddyfile rate-limits to 5 issuances per minute globally,
-which is plenty for normal use and a tight enough cap to prevent runaway
-costs in pathological cases.
-
-## Apex domain support
-
-`shop.example.com` (subdomain) → works out of the box with a `CNAME`.
-
-`example.com` (apex / root domain) requires the DNS provider to support
-`ALIAS` / `ANAME` records (Cloudflare, DNSimple, Vercel DNS do; most
-traditional providers do not). Document as a future improvement.
+The CF cert issuance typically completes in 30–120s after DNS is in
+place. If validation fails, CF returns a structured error in
+`ssl.validation_errors` which the dashboard surfaces inline.
 
 ## Troubleshooting
 
-Customer reports "không vào được" after Verify succeeded:
+**"Domain bị Cloudflare chặn"** — CF has policy blocks for sensitive
+brand names (banks, government, big tech). Owner must pick a different
+hostname.
 
-1. Check `dig CNAME shop.khachhang.com` returns a `*.justvibe.me` answer.
-2. Check Caddy log: `sudo journalctl -u caddy -n 200`.
-   Look for `obtained certificate` for the domain.
-3. If you see `ASK denied`, the domain isn't in `custom_domains` —
-   the customer needs to add it via the dashboard FIRST.
-4. If you see `no certificate available for ...`, the issuance failed —
-   usually means DNS doesn't actually point at us yet. Tell customer
-   to wait + retry.
+**"CNAME chưa propagate"** — Common. Wait 5 min; many DNS providers
+cache aggressively. `dig CNAME shop.khachhang.com` from any machine
+should return `customers.justvibe.me`.
+
+**"Cert pending after 10 min"** — Either DNS is still mis-pointing
+(double-check `dig`), or CF rate-limited Let's Encrypt for this base
+domain (50 certs/week/registered-domain). Wait or contact LE.
+
+**Customer's domain works on HTTP but not HTTPS** — CF SaaS plan must
+be enabled on the zone (step 1 above). Without it, `custom_hostnames`
+API returns success but no SSL.
+
+## Cost projection
+
+- 1–100 custom hostnames: $0/mo (free tier).
+- 101–500 hostnames: ($0.10 × extra)/mo.
+- 1000 hostnames: ~$90/mo total.
+
+Per-tier limits in `src/lib/quota.ts` (`CUSTOM_DOMAIN_LIMITS`) cap us:
+free 0, Pro 5, Max 50. With those caps, even 1000 paying users wouldn't
+exceed CF's free tier until ~20% of them are Max-tier with maxed-out
+domains — at which point the revenue comfortably covers the marginal CF
+fee.
