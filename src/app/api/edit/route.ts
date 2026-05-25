@@ -14,6 +14,7 @@ import { getPrimary, getFallback, withFallback, type AiProvider } from "@/lib/ai
 import { assertQuota, recordUsage, perRequestLimit, maxTurnsFor, weightedTokens } from "@/lib/quota";
 import { APP_MODES, modeOf, type ModeId } from "@/lib/modes";
 import { logTemplateUsage } from "@/lib/store";
+import { substitutePlaceholders } from "@/lib/html-substitute";
 
 // === CLARIFY CACHE ===
 // When the agent asks the user to disambiguate a request, we pause the agent
@@ -94,6 +95,21 @@ The generated app CAN load images from any HTTPS URL (img-src includes https:).
 - For icons, prefer inline SVG (no external dep, scales cleanly). For photos, ALWAYS use external URLs — do NOT draw photos as SVG.
 - NEVER tell the user "I can't fetch images" or "use local SVG instead" — that's wrong; images work.
 - If user provides their own URL, use it as-is.
+
+## FORMS — collect submissions to owner's Sheet
+- For ANY form that collects user input (signup, RSVP, contact, order, lead):
+    <form action="/f/{{APP_ID}}/submit" method="POST">
+      <input name="email" required>
+      ...
+    </form>
+- Each input MUST have a \`name\` attribute → that's the column in the owner's
+  Google Sheet. Examples: name, email, phone, message, guest_count.
+- Keep \`{{APP_ID}}\` literal — server substitutes it.
+- Do NOT add JS \`onsubmit\` with \`alert()\` or \`preventDefault()\`. Server returns
+  a friendly thank-you HTML page. If user wants custom post-submit redirect,
+  add \`?redirect=https://...\` to the action URL.
+- If converting an existing form that used \`alert()\`, REMOVE the JS handler
+  and switch to action="/f/{{APP_ID}}/submit" instead.
 
 ## CLARIFY WHEN AMBIGUOUS
 If the user request is genuinely ambiguous AND the choice would meaningfully change what you'd build (not a style nitpick), ASK before doing anything.
@@ -576,7 +592,8 @@ export async function POST(req: NextRequest) {
           // reset to the original currentHtml, which silently discarded every
           // HTML edit the agent made (so "add a button" looked successful in
           // the agent log but never appeared in the preview).
-          const mergedHtml = mergeFilesToHtml(files);
+          const mergedRaw = mergeFilesToHtml(files);
+          const mergedHtml = substitutePlaceholders(mergedRaw, { appId: projId });
 
           sendProgress(`summary ${encodeURIComponent(summary.slice(0, 300))}`);
 

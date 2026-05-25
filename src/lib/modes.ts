@@ -185,7 +185,20 @@ button{background:var(--primary);color:#fff;border:0;cursor:pointer;font-weight:
     <div><span class="num" id="cd-s">0</span><span class="lbl">Giây</span></div>
   </div>
 </section>
-<!-- LLM_FILL: 3-4 sections in order — story (love story 2-3 paragraphs), schedule (ceremony + reception times/venues), gallery (4-6 placeholder images: https://picsum.photos/seed/X/400), RSVP form (name + attending count + message). Each section starts with <section><h2 class="section-title">...</h2>...</section>. -->
+<!-- LLM_FILL: 3-4 sections in order:
+  1. story (love story 2-3 paragraphs)
+  2. schedule (ceremony + reception times/venues)
+  3. gallery (4-6 placeholder images: https://picsum.photos/seed/X/400)
+  4. RSVP form — MUST use:
+       <form action="/f/{{APP_ID}}/submit" method="POST">
+         <input name="name" placeholder="Họ tên" required>
+         <input name="guests" type="number" min="1" placeholder="Số người" required>
+         <textarea name="message" placeholder="Lời chúc"></textarea>
+         <button type="submit">Xác nhận tham dự</button>
+       </form>
+     The {{APP_ID}} stays literal — server substitutes it.
+  Each section starts with <section><h2 class="section-title">...</h2>...</section>.
+-->
 <section style="text-align:center;color:#888;padding-bottom:24px">Với sự yêu thương từ {{GROOM_NAME}} & {{BRIDE_NAME}}</section>
 <script>
 const target = new Date(document.getElementById('countdown').dataset.target).getTime();
@@ -198,11 +211,6 @@ function tick() {
   document.getElementById('cd-s').textContent = Math.floor(diff%60000/1000);
 }
 tick(); setInterval(tick, 1000);
-document.addEventListener('submit', (e) => {
-  e.preventDefault();
-  alert('Cảm ơn bạn đã xác nhận!');
-  e.target.reset();
-});
 </script>
 </body>
 </html>`;
@@ -263,20 +271,13 @@ Use Vietnamese copy. Keep concise. Match tone of {{PRODUCT_NAME}}.
   <div class="cta-section">
     <h2>{{CTA_HEADLINE}}</h2>
     <p>{{CTA_SUB}}</p>
-    <form class="cta-form" onsubmit="handleSubmit(event)">
-      <input type="email" placeholder="Email của bạn" required>
+    <form class="cta-form" action="/f/{{APP_ID}}/submit" method="POST">
+      <input type="email" name="email" placeholder="Email của bạn" required>
       <button type="submit">{{CTA_TEXT}}</button>
     </form>
   </div>
 </section>
 <footer>© 2026 {{PRODUCT_NAME}}. {{FOOTER_NOTE}}</footer>
-<script>
-function handleSubmit(e) {
-  e.preventDefault();
-  alert('Cảm ơn! Chúng tôi sẽ liên hệ sớm.');
-  e.target.reset();
-}
-</script>
 </body>
 </html>`;
 

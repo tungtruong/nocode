@@ -5,6 +5,7 @@ import { getPrimary, getFallback, createStreamWithFallback, withFallback } from 
 import { assertQuota, recordUsage, perRequestLimit, weightedTokens } from "@/lib/quota";
 import { APP_MODES, modeOf, type ModeId } from "@/lib/modes";
 import { logTemplateUsage } from "@/lib/store";
+import { substitutePlaceholders } from "@/lib/html-substitute";
 
 const NEW_APP_PROMPT = `## ROLE
 You are a web app generator. Build ONE complete single-file HTML app matching the user's description.
@@ -30,6 +31,20 @@ You are a web app generator. Build ONE complete single-file HTML app matching th
 - Pick dimensions per role: hero 1600x800, card 400x300, avatar 120x120, thumbnail 200x200.
 - For icons, use inline SVG. For photos, use external URLs — do NOT try to draw a photo as SVG.
 - NEVER tell the user "I can't fetch images" — that's outdated, images work fine.
+
+## FORMS — IMPORTANT
+- For any form that COLLECTS data (signup, contact, RSVP, order, lead capture), use:
+    <form action="/f/{{APP_ID}}/submit" method="POST">
+      <input name="email" ...>
+      ...
+    </form>
+- Server collects submissions into the owner's Google Sheet (if connected) or
+  fallback storage. Owner sees them in the dashboard.
+- Each input MUST have a \`name\` attribute — that becomes the column header.
+- Keep \`{{APP_ID}}\` literal in your output. Server substitutes it.
+- After submit, server returns a friendly HTML thank-you page automatically —
+  do NOT add an \`onsubmit\` handler with \`alert()\` or \`preventDefault()\`.
+- For "open in new tab", add \`target="_blank"\` to the form.
 
 ## DO NOT
 - Do not include analytics, tracking, external CDN scripts unless explicitly requested.
@@ -286,7 +301,9 @@ export async function POST(req: NextRequest) {
 
           // Output-side safety scan. If the final HTML looks malicious, replace
           // with a blocked page (and tell client to reset preview first).
-          const final = cleanHtml(accumulated);
+          // Substitute {{APP_ID}} BEFORE all downstream consumers (safety scan,
+          // telemetry, stream to client) so it's invisible past this point.
+          const final = substitutePlaceholders(cleanHtml(accumulated), { appId: projId });
 
           // Template telemetry: log every generation + flag if any {{X}}
           // placeholder slipped through (catches model failures so we can

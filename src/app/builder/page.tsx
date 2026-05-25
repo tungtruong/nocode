@@ -324,10 +324,16 @@ export default function BuilderPage() {
       if (!force && now - lastPreviewAt < 250) return;
       lastPreviewAt = now;
       const node = sf.current;
+      // Replace the {{APP_ID}} form-action placeholder client-side too —
+      // the chat stream sends raw chunks before server-side substitution
+      // finalizes, so the live preview would render `/f/{{APP_ID}}/submit`
+      // otherwise. Server still does the same swap before storing the final
+      // HTML so deployed apps are correct (defense in depth).
+      const substituted = appId ? htmlStr.replaceAll("{{APP_ID}}", appId) : htmlStr;
       // CSP applies on every render (always). Animation only on FINAL render
       // (force=true) — mid-stream srcdoc swaps would re-trigger the animation
       // every 250ms and look like a strobe.
-      if (node) node.srcdoc = force ? injectPreviewAnim(htmlStr) : injectPreviewCspOnly(htmlStr);
+      if (node) node.srcdoc = force ? injectPreviewAnim(substituted) : injectPreviewCspOnly(substituted);
     };
 
     try {

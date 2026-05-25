@@ -5,6 +5,7 @@ import path from "path";
 import { requireSession, authError } from "@/lib/auth";
 import { addApp, getApp, getProject, logTemplateUsage, pickSlug, countAppsByUser } from "@/lib/store";
 import { deployLimit, tierFor, TIER_LABELS } from "@/lib/quota";
+import { substitutePlaceholders } from "@/lib/html-substitute";
 
 const MAX_HTML_SIZE = 5 * 1024 * 1024; // 5MB
 
@@ -87,7 +88,10 @@ export async function POST(req: NextRequest) {
 
     const dir = path.join(process.cwd(), "public", "apps", id);
     await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(path.join(dir, "index.html"), html, "utf-8");
+    // Substitute {{APP_ID}} → real id so deployed forms hit /f/<id>/submit
+    // correctly. Idempotent: re-running on already-substituted HTML is a no-op.
+    const finalHtml = substitutePlaceholders(html, { appId: id });
+    await fs.writeFile(path.join(dir, "index.html"), finalHtml, "utf-8");
 
     // Preserve the slug across re-deploys; only allocate one on first deploy.
     const slug = existingSlug ?? pickSlug(title || "app", id);

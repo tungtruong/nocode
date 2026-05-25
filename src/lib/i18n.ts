@@ -275,6 +275,23 @@ export const t = {
     limitProjectsExceeded: "Đã đạt giới hạn dự án của gói {tier} ({used}/{quota}). Xóa dự án cũ hoặc nâng gói để tiếp tục.",
     limitDeploysExceeded: "Đã đạt giới hạn app deploy của gói {tier} ({used}/{quota}). Xóa app cũ hoặc nâng gói để tiếp tục.",
 
+    // Integrations
+    integrationsTitle: "Kết nối dịch vụ",
+    integrationsSub: "Dùng Google Sheets của bạn làm database cho các app — data luôn nằm trong Drive của bạn, JustVibe chỉ là trung gian gọi API.",
+    integrationsGoogleNotConnected: "Chưa kết nối Google",
+    integrationsGoogleConnected: "Đã kết nối Google",
+    integrationsConnectGoogle: "Kết nối Google Sheets",
+    integrationsDisconnect: "Ngắt kết nối",
+    integrationsAccountLabel: "Tài khoản:",
+    integrationsAppBindingsTitle: "Sheet bind cho từng app",
+    integrationsAppBindingsSub: "Mỗi app trỏ tới 1 sheet. Ấn 'Đổi sheet' để bind lại.",
+    integrationsNoBindings: "Chưa có app nào bind sheet. Mở app trong builder để bind.",
+    integrationsSheetPickerTitle: "Chọn sheet",
+    integrationsCreateNew: "Tạo sheet mới",
+    integrationsNewSheetTitle: "Tên sheet (vd: Đăng ký khoá học)",
+    integrationsNewSheetHeaders: "Cột (cách nhau dấu phẩy, vd: name, email, phone)",
+    integrationsErrorNotConnected: "Cần kết nối Google trước",
+
     // Token topup
     topupTitle: "Mua thêm token",
     topupSubtitle: "Hết quota giữa tháng? Mua pack token bổ sung — token cộng vào tháng hiện tại.",
@@ -558,6 +575,22 @@ export const t = {
 
     limitProjectsExceeded: "Reached the {tier} plan project limit ({used}/{quota}). Delete old projects or upgrade to continue.",
     limitDeploysExceeded: "Reached the {tier} plan deploy limit ({used}/{quota}). Delete old apps or upgrade to continue.",
+
+    integrationsTitle: "Connected services",
+    integrationsSub: "Use your Google Sheets as the database for your apps — data stays in your Drive, JustVibe just proxies the API.",
+    integrationsGoogleNotConnected: "Google not connected",
+    integrationsGoogleConnected: "Google connected",
+    integrationsConnectGoogle: "Connect Google Sheets",
+    integrationsDisconnect: "Disconnect",
+    integrationsAccountLabel: "Account:",
+    integrationsAppBindingsTitle: "Sheets bound to each app",
+    integrationsAppBindingsSub: "Each app points to one sheet. Click 'Change sheet' to rebind.",
+    integrationsNoBindings: "No app has a sheet bound yet. Open an app in the builder to bind one.",
+    integrationsSheetPickerTitle: "Pick a sheet",
+    integrationsCreateNew: "Create new sheet",
+    integrationsNewSheetTitle: "Sheet name (e.g. Course Signups)",
+    integrationsNewSheetHeaders: "Columns (comma-separated, e.g. name, email, phone)",
+    integrationsErrorNotConnected: "Connect Google first",
 
     topupTitle: "Buy more tokens",
     topupSubtitle: "Out of quota mid-month? Buy a top-up pack — tokens credit to the current month.",

@@ -215,6 +215,65 @@ function migrate(db: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS topups_user_period_idx ON topups(user_email, period, status);
   `);
+
+  // Stored OAuth credentials for third-party services the user has connected
+  // (Google Sheets/Drive, later: Notion, Airtable, etc). Tokens are encrypted
+  // at rest with INTEGRATION_VAULT_KEY (AES-256-GCM) — see src/lib/crypto.ts.
+  //
+  // One row per (user_email, provider) pair — re-connecting overwrites the
+  // existing row to refresh tokens + scope.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_integrations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_email TEXT NOT NULL COLLATE NOCASE,
+      provider TEXT NOT NULL,           -- 'google_sheets' | 'google_drive' | future...
+      refresh_token_enc TEXT NOT NULL,  -- AES-256-GCM ciphertext (base64)
+      access_token_enc TEXT,            -- short-lived, may be null + lazily refreshed
+      expires_at TEXT,                  -- ISO timestamp when access_token expires
+      scope TEXT NOT NULL,              -- space-separated scopes granted
+      account_email TEXT,               -- the Google account email (may differ from user_email)
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(user_email, provider)
+    );
+    CREATE INDEX IF NOT EXISTS user_integrations_user_idx ON user_integrations(user_email);
+  `);
+
+  // Fallback storage for form submissions when the app's owner hasn't
+  // connected Google Sheets yet. Rows here are temporary — the dashboard
+  // nudges the owner to connect + migrate. Kept 30 days max (cron later).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS form_submissions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      ip TEXT,
+      user_agent TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS form_submissions_app_idx ON form_submissions(app_id, created_at DESC);
+  `);
+
+  // Per-app data source binding: which integration + which sheet/file/folder
+  // is "the database" for this app. One row per (app_id, kind).
+  //
+  // source_config_json holds provider-specific config:
+  //   For sheets: { spreadsheetId, sheetName, headerRow }
+  //   For drive:  { folderId }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_data_sources (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id TEXT NOT NULL,             -- matches projects.id / apps.id
+      user_email TEXT NOT NULL COLLATE NOCASE,
+      kind TEXT NOT NULL,               -- 'sheet' | 'drive_folder' | future...
+      provider TEXT NOT NULL,           -- 'google_sheets' | 'google_drive'
+      source_config_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(app_id, kind)
+    );
+    CREATE INDEX IF NOT EXISTS app_data_sources_user_idx ON app_data_sources(user_email);
+  `);
 }
 
 // One-time import of the old JSON files into SQLite. Marked done in `meta`

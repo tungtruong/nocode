@@ -158,13 +158,18 @@ export default function DashboardPage() {
       </nav>
 
       <section className="max-w-4xl mx-auto px-4 sm:px-6 pt-8 pb-32">
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-8 flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-bold">{t.dashTitle}</h1>
             <p className="text-sm text-[#71717a]">{t.dashDesc}</p>
           </div>
-          <button onClick={() => setRedeemOpen(true)} className="text-xs rounded-lg border border-[#7c3aed]/20 bg-[#7c3aed]/[0.04] px-3 py-1.5 text-[#7c3aed] hover:bg-[#7c3aed]/[0.08] transition-colors">{t.dashRedeem}</button>
-          <button onClick={handleLogout} className="text-xs text-[#64748b] hover:text-[#64748b] transition-colors">{t.signout}</button>
+          <div className="flex items-center gap-2">
+            <Link href="/dashboard/integrations" className="text-xs rounded-lg border border-[#e8e8ec] bg-white px-3 py-1.5 text-[#52525b] hover:text-[#18181b] hover:bg-[#fafafa] transition-colors">
+              🔌 Kết nối
+            </Link>
+            <button onClick={() => setRedeemOpen(true)} className="text-xs rounded-lg border border-[#7c3aed]/20 bg-[#7c3aed]/[0.04] px-3 py-1.5 text-[#7c3aed] hover:bg-[#7c3aed]/[0.08] transition-colors">{t.dashRedeem}</button>
+            <button onClick={handleLogout} className="text-xs text-[#64748b] hover:text-[#64748b] transition-colors">{t.signout}</button>
+          </div>
         </div>
 
         <ReferralWidget />
