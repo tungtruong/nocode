@@ -477,6 +477,8 @@ export default function BuilderPage() {
                 stepKey === "fallback" ? t.buildFallback :
                 stepKey === "done" ? t.buildDone : stepKey;
               setProgress(label);
+            } else if (pl === "hb") {
+              // Server keepalive — silent. Don't update progress.
             } else if (pl) {
               setProgress(pl);
             }

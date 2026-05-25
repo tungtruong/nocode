@@ -78,10 +78,15 @@ export const PER_REQUEST_LIMITS: Record<Tier, number> = {
 
 // Per-request hard maxTurns (latency cap). Independent of token cap — protects
 // against models that emit zero-token tool loops.
+// Capped so the total edit duration stays UNDER Cloudflare's 100s proxy
+// timeout — going over kills the stream client-side ("Load failed") even
+// though the server completes happily. With our agent averaging 5-10s per
+// tool call, ~8 turns is the realistic ceiling at the free CF plan.
+// If we move to a paid CF plan (or DNS-only for the API), bump these back up.
 export const MAX_TURNS_PER_TIER: Record<Tier, number> = {
-  free: 8,
-  pro: 16,
-  team: 22,
+  free: 6,
+  pro: 10,
+  team: 14,
 };
 
 // How many in-progress projects (chat history rows) a user can keep, and how

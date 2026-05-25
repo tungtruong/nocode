@@ -311,10 +311,22 @@ export async function POST(req: NextRequest) {
         const safeClose = () => {
           if (closed) return;
           closed = true;
+          if (keepalive) { clearInterval(keepalive); keepalive = null; }
           try { controller.close(); } catch { /* already closed */ }
         };
         const sendProgress = (msg: string) => safeEnqueue(encoder.encode(`\x1E${msg}\n`));
-        req.signal.addEventListener("abort", () => { closed = true; });
+        req.signal.addEventListener("abort", () => {
+          closed = true;
+          if (keepalive) { clearInterval(keepalive); keepalive = null; }
+        });
+
+        // Keepalive: a tiny progress marker every 25s prevents Cloudflare's
+        // 100s idle-connection timeout from cutting the stream while the
+        // agent is mid-DeepSeek-call. Client treats "hb" as no-op.
+        let keepalive: ReturnType<typeof setInterval> | null = setInterval(() => {
+          if (closed) return;
+          safeEnqueue(encoder.encode("\x1Ehb\n"));
+        }, 25_000);
 
         // Two-axis cap per request:
         //  - maxTurns: latency guard (per tier: free=12, pro=16, team=20).
