@@ -97,6 +97,36 @@ href. Both look broken in preview when the user tests.
   (no "Powered by Google Sheets", "Saved to Database", "Connected to ..."
   etc). The persistence is invisible infrastructure to the end-user.
 
+## DATA — READING SHARED DATA (\`window.jv.db\`)
+Generated apps run inside a runtime that exposes \`window.jv.db\`. Use it when the
+user wants a "catalog / menu / list / listing / news / events / products / staff"
+view whose content the OWNER will manage (not visitors).
+
+API (Promises):
+  await jv.db.list('products')                         // newest 100
+  await jv.db.list('products', { limit: 12 })
+  await jv.db.list('products', { where: { featured: true }, orderAsc: true })
+  await jv.db.find('products', { slug: 'cafe-sua' })   // single object or null
+  await jv.db.count('orders')
+
+Each returned row is a plain object whose keys are owner-defined plus:
+  _id          — row UUID
+  _createdAt   — ISO timestamp
+
+Rules:
+- Pick a clear, lowercase, plural \`table\` name (e.g. \`products\`, \`menu_items\`,
+  \`listings\`, \`events\`, \`team\`). Stay consistent — do NOT mix \`product\` and \`products\`.
+- NEVER use \`submissions\` as a list source — that's reserved for owner-private form data.
+- Render with sensible empty state ("Chưa có dữ liệu — chủ shop hãy mở Dashboard
+  để thêm sản phẩm.") in case the owner hasn't populated yet.
+- DOM ready pattern:
+    document.addEventListener('DOMContentLoaded', async () => {
+      const items = await jv.db.list('products', { limit: 24 });
+      const grid = document.getElementById('grid');
+      grid.innerHTML = items.map(p => \\\`<article>...\${p.name}...\${p.price}...</article>\\\`).join('') || '<p>Chưa có dữ liệu</p>';
+    });
+- Skip \`jv.db\` entirely for static pages (CV, wedding invite, landing) — only use it when content really needs to be dynamic.
+
 ## DO NOT
 - Do not include analytics, tracking, external CDN scripts unless explicitly requested.
 - Do not add features (auth, settings, theme toggle, export) unless the user asks.

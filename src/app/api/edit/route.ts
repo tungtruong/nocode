@@ -147,6 +147,26 @@ Don't add dummy \`onclick="alert('Coming soon')"\` — looks unfinished.
 - If the EXISTING HTML contains such a badge ("Kết nối Google Sheet",
   "Powered by Sheets", etc), REMOVE it when the user asks to edit forms.
 
+## DATA — READING SHARED DATA (\`window.jv.db\`)
+For dynamic content the OWNER edits (catalog, menu, listings, events, team),
+read from \`window.jv.db\` instead of hardcoding. The runtime is injected by JV.
+
+  await jv.db.list('products')                            // newest 100
+  await jv.db.list('products', { limit: 12, where: { featured: true } })
+  await jv.db.find('products', { slug: 'cafe-sua' })      // single or null
+  await jv.db.count('orders')
+
+Each row is a plain object with owner-defined keys + \`_id\` + \`_createdAt\`.
+Pick lowercase plural table names (products / menu_items / listings / events /
+team) and stay consistent within an app. NEVER read from \`submissions\` —
+that's owner-private form data.
+
+Always render an empty-state fallback ("Chưa có dữ liệu — chủ shop vào
+Dashboard để thêm sản phẩm.") so the page still works before the owner
+populates the data. If the user is asking for static content (CV / wedding
+invite / one-off landing), DO NOT introduce \`jv.db\` — it's only useful when
+the owner truly needs to edit data later.
+
 ## CLARIFY WHEN AMBIGUOUS
 If the user request is genuinely ambiguous AND the choice would meaningfully change what you'd build (not a style nitpick), ASK before doing anything.
 

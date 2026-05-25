@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import fs from "fs/promises";
 import path from "path";
+import { injectJvRuntime } from "@/lib/jv-runtime";
 
 // Defence-in-depth alongside the iframe sandbox: even though the sandbox already
 // gives the iframe an opaque origin, an injected CSP meta tag blocks the
@@ -57,7 +58,7 @@ export default async function AppPage({
 
   return (
     <iframe
-      srcDoc={injectCsp(html)}
+      srcDoc={injectCsp(injectJvRuntime(html, id))}
       title="Deployed App"
       className="fixed inset-0 w-full h-full border-0 bg-white"
       sandbox="allow-scripts allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"

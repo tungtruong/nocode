@@ -35,7 +35,10 @@ function cleanHtml(raw: string): string {
 // form-action allows justvibe.me so generated apps can POST forms to our
 // /f/<id>/submit endpoint. base-uri allows the same so the <base> tag we
 // inject (so relative URLs resolve under a srcdoc with no origin) is honored.
-const PREVIEW_CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'none'; form-action https://justvibe.me; base-uri https://justvibe.me; object-src 'none'">`;
+// connect-src allows the JV API origin so the injected `window.jv.db.*`
+// runtime can fetch from /api/db/<id>/<table>/list. Without this, all
+// jv.db calls fail with a CSP violation in the preview iframe.
+const PREVIEW_CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'self' https://justvibe.me; form-action https://justvibe.me; base-uri https://justvibe.me; object-src 'none'">`;
 // Without a <base>, relative URLs in srcdoc resolve to `about:srcdoc/...`
 // which goes nowhere. Inject one pointing at the production domain so the
 // form action="/f/<id>/submit" hits the real server. Deployed apps don't
@@ -106,16 +109,23 @@ const PREVIEW_ANIM_SCRIPT = `<script>(function(){
 // then the localStorage shim + error catcher (so they're installed before any
 // user <script> that might call them), then the animation style. Animation
 // script goes at the end of <body>.
-function injectPreviewAnim(html: string): string {
+function jvBootTag(appId: string | null | undefined): string {
+  if (!appId) return "";
+  // Mirrors jvRuntimeScriptTag in src/lib/jv-runtime.ts but inlined here to
+  // avoid pulling a server-only module into the builder client bundle.
+  const safe = appId.replace(/[^a-zA-Z0-9_-]/g, "");
+  return `<script>window.__JV_APP_ID__=${JSON.stringify(safe)};</script><script>(function(){if(window.jv)return;var APP_ID=window.__JV_APP_ID__||"";var API=window.__JV_API_BASE__||"https://justvibe.me";function rpc(t,b){return fetch(API+"/api/db/"+encodeURIComponent(APP_ID)+"/"+encodeURIComponent(t)+"/list",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(b||{})}).then(function(r){if(!r.ok)return r.json().catch(function(){return{error:"HTTP "+r.status};}).then(function(e){throw new Error(e.error||("HTTP "+r.status));});return r.json();}).then(function(r){return(r.rows||[]).map(function(row){var d=row.row_data||{};d._id=row.id;d._createdAt=row.created_at;return d;});});}window.jv={appId:APP_ID,db:{list:function(t,o){return rpc(t,o||{});},find:function(t,w){return rpc(t,{where:w,limit:1}).then(function(a){return a[0]||null;});},count:function(t,w){return rpc(t,{where:w,limit:1000}).then(function(a){return a.length;});}}};})();</script>`;
+}
+function injectPreviewAnim(html: string, appId?: string | null): string {
   if (!html) return html;
   return injectIntoHead(
     injectIntoBody(html, PREVIEW_ANIM_SCRIPT),
-    PREVIEW_BASE_TAG + PREVIEW_CSP + PREVIEW_SHIM + PREVIEW_ANIM_STYLE
+    PREVIEW_BASE_TAG + PREVIEW_CSP + PREVIEW_SHIM + jvBootTag(appId) + PREVIEW_ANIM_STYLE
   );
 }
-function injectPreviewCspOnly(html: string): string {
+function injectPreviewCspOnly(html: string, appId?: string | null): string {
   if (!html) return html;
-  return injectIntoHead(html, PREVIEW_BASE_TAG + PREVIEW_CSP + PREVIEW_SHIM);
+  return injectIntoHead(html, PREVIEW_BASE_TAG + PREVIEW_CSP + PREVIEW_SHIM + jvBootTag(appId));
 }
 function injectIntoHead(html: string, snippet: string): string {
   if (/<head[^>]*>/i.test(html)) return html.replace(/<head([^>]*)>/i, `<head$1>${snippet}`);
@@ -363,7 +373,7 @@ export default function BuilderPage() {
       // CSP applies on every render (always). Animation only on FINAL render
       // (force=true) — mid-stream srcdoc swaps would re-trigger the animation
       // every 250ms and look like a strobe.
-      if (node) node.srcdoc = force ? injectPreviewAnim(substituted) : injectPreviewCspOnly(substituted);
+      if (node) node.srcdoc = force ? injectPreviewAnim(substituted, appId) : injectPreviewCspOnly(substituted, appId);
     };
 
     try {
@@ -539,9 +549,9 @@ export default function BuilderPage() {
   // injectPreviewAnim — it just prepends another snippet under <head>.
   const animatedHtml = useMemo(() => {
     if (!html) return "";
-    const base = injectPreviewAnim(html);
+    const base = injectPreviewAnim(html, appId);
     return visualEdit ? injectIntoHead(base, VISUAL_EDIT_BRIDGE_SCRIPT) : base;
-  }, [html, visualEdit]);
+  }, [html, visualEdit, appId]);
 
   // Listen for messages from the preview iframes (visual-edit bridge).
   useEffect(() => {
