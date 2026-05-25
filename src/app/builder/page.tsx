@@ -26,7 +26,11 @@ function cleanHtml(raw: string): string {
 // This CSP meta tag adds a second layer that blocks the *user's* code inside
 // the preview from reaching external services (CDNs, trackers, exfil endpoints).
 // 'unsafe-inline' is required because generated apps inline their <style>/<script>.
-const PREVIEW_CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'">`;
+// img-src includes `https:` so generated apps can pull from external image
+// hosts (Unsplash, picsum.photos, Cloudinary, user-uploaded URLs, etc.).
+// The iframe is still sandboxed with an opaque origin so any "tracker pixel"
+// load can't read or exfil user state — only side effect is the image hit.
+const PREVIEW_CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'">`;
 
 // In a sandboxed iframe (no allow-same-origin), localStorage/sessionStorage/cookie
 // access throws SecurityError on every call. AI-generated apps frequently use

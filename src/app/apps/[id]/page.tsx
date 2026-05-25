@@ -7,12 +7,15 @@ import path from "path";
 // deployed HTML from reaching external services (CDNs, trackers, exfiltration
 // endpoints). 'unsafe-inline' is required because every generated app uses
 // inline <style> and <script>.
+// Allow images + fonts + stylesheets to come from any HTTPS origin so generated
+// apps can use Unsplash/picsum/Cloudinary/CDN fonts/etc. The page is rendered
+// inside an iframe sandbox so an asset load can't see or affect parent state.
 const CSP = [
   "default-src 'self' data: blob:",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
-  "font-src 'self' data:",
+  "style-src 'self' 'unsafe-inline' https:",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data: https:",
   "connect-src 'none'",
   "frame-ancestors 'self'",
   "base-uri 'none'",

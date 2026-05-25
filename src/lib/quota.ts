@@ -107,6 +107,40 @@ export function deployLimit(email: string): number {
   return DEPLOY_LIMITS[tierFor(email)];
 }
 
+// === TOKEN TOPUP PACKS ===
+//
+// One-time PayPal purchases that add weighted tokens to the current month's
+// quota (consumed before/alongside the subscription quota; either way the
+// total `remaining` just goes up). Only Pro and Max can buy — Free users see
+// "upgrade tier" instead so they can't avoid the subscription path.
+//
+// Pricing is intentionally a 1.5-2.5× premium per token vs the matching
+// subscription tier so users still prefer upgrading their plan. Topup is
+// "emergency fuel" for users who would otherwise be blocked.
+export type TopupPackId = "pack10m" | "pack25m";
+export interface TopupPack {
+  id: TopupPackId;
+  tokens: number;     // weighted tokens added
+  priceUsd: number;
+  label: string;      // i18n key isn't worth it for 2 strings; inline.
+}
+// Prices set assuming PayPal cross-border fee of 4.4% + $0.30. Post-fee
+// per-token rate stays ≥ 2× the matching subscription so users still see
+// upgrading their plan as the cheaper long-term option.
+export const TOPUP_PACKS: Record<TopupPackId, TopupPack> = {
+  pack10m: { id: "pack10m", tokens: 10_000_000, priceUsd: 19, label: "10M Token" },
+  pack25m: { id: "pack25m", tokens: 25_000_000, priceUsd: 39, label: "25M Token" },
+};
+export function isValidPackId(id: unknown): id is TopupPackId {
+  return typeof id === "string" && id in TOPUP_PACKS;
+}
+
+// Tiers allowed to buy topups (Free has to upgrade their plan first).
+export function canBuyTopup(email: string): boolean {
+  const t = tierFor(email);
+  return t === "pro" || t === "team";
+}
+
 export const TIER_LABELS: Record<Tier, string> = {
   free: "Miễn phí",
   pro: "Pro",
@@ -169,6 +203,17 @@ export function maxTurnsFor(email: string): number {
   return MAX_TURNS_PER_TIER[tierFor(email)];
 }
 
+// Sum of `tokens_added` from completed topups in the user's current period.
+// Cached not worth it — single indexed query, tiny rows.
+export function getTopupTokens(email: string, period: string = currentPeriod()): number {
+  const row = getDb()
+    .prepare(
+      "SELECT COALESCE(SUM(tokens_added), 0) AS n FROM topups WHERE user_email = ? AND period = ? AND status = 'completed'"
+    )
+    .get(email, period) as { n: number };
+  return row.n;
+}
+
 export function getUsage(email: string): UsageInfo {
   const period = currentPeriod();
   const tier = tierFor(email);
@@ -177,7 +222,11 @@ export function getUsage(email: string): UsageInfo {
     .get(email, period) as { tokens_used: number } | undefined;
   const used = row?.tokens_used ?? 0;
   const unlimited = isUnlimited();
-  const quota = unlimited ? Number.MAX_SAFE_INTEGER : TIER_LIMITS[tier];
+  // Subscription quota + any topup tokens purchased this period. Topups expire
+  // at period rollover by design (same window as sub).
+  const baseQuota = unlimited ? Number.MAX_SAFE_INTEGER : TIER_LIMITS[tier];
+  const topupTokens = unlimited ? 0 : getTopupTokens(email, period);
+  const quota = unlimited ? baseQuota : baseQuota + topupTokens;
   return {
     used,
     quota,

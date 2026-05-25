@@ -97,6 +97,36 @@ export async function POST(req: NextRequest) {
         if (result.recorded) console.log(`[paypal] referral commission for ${email}, sale=${r.id}`);
         break;
       }
+      case "PAYMENT.CAPTURE.COMPLETED": {
+        // One-time order capture — used for token topup packs. Idempotent:
+        // we look up the topups row by paypal_order_id and flip status only
+        // if still pending. supplementary_data.related_ids.order_id is where
+        // the order id sits inside the capture event.
+        const r = event.resource as {
+          id: string;                  // capture id (not order id)
+          status?: string;             // "COMPLETED"
+          supplementary_data?: { related_ids?: { order_id?: string } };
+          custom_id?: string;
+        };
+        const orderId = r.supplementary_data?.related_ids?.order_id;
+        if (!orderId) {
+          console.log("[paypal] PAYMENT.CAPTURE.COMPLETED with no order_id, skipping");
+          break;
+        }
+        const row = db
+          .prepare("SELECT user_email, status, tokens_added FROM topups WHERE paypal_order_id = ?")
+          .get(orderId) as { user_email: string; status: string; tokens_added: number } | undefined;
+        if (!row) {
+          // Not a topup we created (or stale event before DB write).
+          break;
+        }
+        if (row.status === "completed") break;
+        db.prepare(
+          "UPDATE topups SET status = 'completed', completed_at = ? WHERE paypal_order_id = ?"
+        ).run(new Date().toISOString(), orderId);
+        console.log(`[paypal] topup capture credited ${row.user_email} +${row.tokens_added} order=${orderId}`);
+        break;
+      }
       default:
         // ignore — many event types we didn't subscribe to (e.g. CHECKOUT.*)
         break;

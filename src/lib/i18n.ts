@@ -249,6 +249,16 @@ export const t = {
     // Limit errors (returned by API as plain VI messages)
     limitProjectsExceeded: "Đã đạt giới hạn dự án của gói {tier} ({used}/{quota}). Xóa dự án cũ hoặc nâng gói để tiếp tục.",
     limitDeploysExceeded: "Đã đạt giới hạn app deploy của gói {tier} ({used}/{quota}). Xóa app cũ hoặc nâng gói để tiếp tục.",
+
+    // Token topup
+    topupTitle: "Mua thêm token",
+    topupSubtitle: "Hết quota giữa tháng? Mua pack token bổ sung — token cộng vào tháng hiện tại.",
+    topupTierBlocked: "Gói Free chưa hỗ trợ mua thêm. Nâng cấp Pro hoặc Max để mở.",
+    topupBtn: "Mua",
+    topupProcessing: "Đang xử lý...",
+    topupSuccess: "✓ Đã cộng {tokens} token vào quota",
+    topupErrorGeneric: "Mua thất bại. Thử lại sau.",
+    topupNote: "Token bổ sung dùng đến hết tháng hiện tại (không rollover sang tháng sau).",
   },
 
   en: {
@@ -498,5 +508,14 @@ export const t = {
 
     limitProjectsExceeded: "Reached the {tier} plan project limit ({used}/{quota}). Delete old projects or upgrade to continue.",
     limitDeploysExceeded: "Reached the {tier} plan deploy limit ({used}/{quota}). Delete old apps or upgrade to continue.",
+
+    topupTitle: "Buy more tokens",
+    topupSubtitle: "Out of quota mid-month? Buy a top-up pack — tokens credit to the current month.",
+    topupTierBlocked: "Free plan can't top up. Upgrade to Pro or Max to unlock.",
+    topupBtn: "Buy",
+    topupProcessing: "Processing...",
+    topupSuccess: "✓ Added {tokens} tokens to your quota",
+    topupErrorGeneric: "Purchase failed. Please try again.",
+    topupNote: "Top-up tokens last through the end of the current month (no rollover).",
   },
 } as const;

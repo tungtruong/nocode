@@ -160,3 +160,67 @@ export async function getSubscription(id: string): Promise<{
 }> {
   return paypalFetch(`/v1/billing/subscriptions/${id}`);
 }
+
+// === One-time orders (used for token topup packs) ===
+//
+// Subscriptions use /v1/billing/subscriptions; one-time payments use the v2
+// Orders API. Flow:
+//   1. createOrder(...) → returns order id + approval URL
+//   2. user approves on paypal.com → comes back to return_url
+//   3. captureOrder(orderId) charges the card and returns CAPTURE_COMPLETED
+//   4. our /api/topup/capture credits tokens; the webhook (idempotent) is a
+//      backup for direct redirects that miss the synchronous step.
+export interface CreatedOrder {
+  id: string;
+  approvalUrl: string;
+}
+export async function createOrder(opts: {
+  amountUsd: number;
+  description: string;
+  custom_id: string;          // we encode "<email>|<packId>" here
+  returnUrl: string;
+  cancelUrl: string;
+}): Promise<CreatedOrder> {
+  const order = await paypalFetch<{ id: string; links: Array<{ href: string; rel: string }> }>(
+    "/v2/checkout/orders",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        intent: "CAPTURE",
+        purchase_units: [
+          {
+            description: opts.description,
+            custom_id: opts.custom_id,
+            amount: { currency_code: "USD", value: opts.amountUsd.toFixed(2) },
+          },
+        ],
+        application_context: {
+          brand_name: "JustVibe",
+          locale: "vi-VN",
+          shipping_preference: "NO_SHIPPING",
+          user_action: "PAY_NOW",
+          return_url: opts.returnUrl,
+          cancel_url: opts.cancelUrl,
+        },
+      }),
+    }
+  );
+  const approval = order.links.find((l) => l.rel === "approve");
+  if (!approval) throw new Error("No approval link in PayPal order response");
+  return { id: order.id, approvalUrl: approval.href };
+}
+
+export interface CapturedOrder {
+  id: string;
+  status: string; // "COMPLETED" on success
+  purchase_units?: Array<{
+    custom_id?: string;
+    payments?: { captures?: Array<{ id: string; status: string; amount: { value: string; currency_code: string } }> };
+  }>;
+}
+export async function captureOrder(orderId: string): Promise<CapturedOrder> {
+  return paypalFetch<CapturedOrder>(`/v2/checkout/orders/${orderId}/capture`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}

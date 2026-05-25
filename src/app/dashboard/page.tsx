@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useLang, LangToggle } from "@/components/LangProvider";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ReferralWidget } from "@/components/ReferralWidget";
+import { TopupPanel } from "@/components/TopupPanel";
 
 interface AppItem {
   id: string;
@@ -27,6 +28,7 @@ interface ProjectItem {
 export default function DashboardPage() {
   const { t } = useLang();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [apps, setApps] = useState<AppItem[]>([]);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,6 +39,8 @@ export default function DashboardPage() {
   const [redeemCode, setRedeemCode] = useState("");
   const [redeemMsg, setRedeemMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [redeemBusy, setRedeemBusy] = useState(false);
+  const [tier, setTier] = useState<"free" | "pro" | "team">("free");
+  const [topupBanner, setTopupBanner] = useState<{ kind: "ok" | "err" | "info"; text: string } | null>(null);
 
   const submitRedeem = async () => {
     const code = redeemCode.trim();
@@ -67,10 +71,12 @@ export default function DashboardPage() {
     Promise.all([
       fetch("/api/apps").then((r) => r.json()),
       fetch("/api/projects").then((r) => r.json()),
+      fetch("/api/usage").then((r) => r.ok ? r.json() : null).catch(() => null),
     ])
-      .then(([appsRes, projectsRes]) => {
+      .then(([appsRes, projectsRes, usageRes]) => {
         if (appsRes.apps) setApps(appsRes.apps);
         if (projectsRes.projects) setProjects(projectsRes.projects);
+        if (usageRes?.tier) setTier(usageRes.tier);
         if (appsRes.error || projectsRes.error) {
           setError(appsRes.error || projectsRes.error || t.dashFetchError);
         }
@@ -78,6 +84,41 @@ export default function DashboardPage() {
       .catch(() => setError(t.dashConnError))
       .finally(() => setLoading(false));
   }, [t]);
+
+  // Handle return from PayPal topup approval. PayPal appends `?token=<orderId>`
+  // on success. We POST to /api/topup/capture to finalize, then clean the URL.
+  // queueMicrotask defers state updates one tick so we satisfy the
+  // react-hooks/set-state-in-effect rule (no sync setState inside an effect).
+  useEffect(() => {
+    const topupStatus = searchParams.get("topup");
+    const orderId = searchParams.get("token");
+    if (!topupStatus) return;
+
+    if (topupStatus === "cancel") {
+      queueMicrotask(() => setTopupBanner({ kind: "info", text: "Đã huỷ thanh toán topup." }));
+      router.replace("/dashboard");
+      return;
+    }
+    if (topupStatus === "success" && orderId) {
+      queueMicrotask(() => setTopupBanner({ kind: "info", text: t.topupProcessing }));
+      fetch("/api/topup/capture", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId }),
+      })
+        .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+        .then(({ ok, d }) => {
+          if (ok && d.tokensAdded) {
+            const m = (d.tokensAdded / 1_000_000).toFixed(0);
+            setTopupBanner({ kind: "ok", text: t.topupSuccess.replace("{tokens}", `${m}M`) });
+          } else {
+            setTopupBanner({ kind: "err", text: d.error || t.topupErrorGeneric });
+          }
+        })
+        .catch(() => setTopupBanner({ kind: "err", text: t.topupErrorGeneric }))
+        .finally(() => router.replace("/dashboard"));
+    }
+  }, [searchParams, router, t]);
 
   const requestDelete = (id: string) => setDeletingId(id);
   const confirmDelete = async () => {
@@ -127,6 +168,22 @@ export default function DashboardPage() {
         </div>
 
         <ReferralWidget />
+
+        {topupBanner && (
+          <div className={`mt-4 rounded-xl px-4 py-2.5 text-xs ${
+            topupBanner.kind === "ok"
+              ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
+              : topupBanner.kind === "err"
+                ? "border border-red-200 bg-red-50 text-red-600"
+                : "border border-[#e8e8ec] bg-[#fafafa] text-[#64748b]"
+          }`}>
+            {topupBanner.text}
+          </div>
+        )}
+
+        <div className="mt-6">
+          <TopupPanel tierAllowed={tier === "pro" || tier === "team"} />
+        </div>
 
         {loading && (
           <div className="space-y-3" aria-label={t.dashLoading} aria-busy="true">

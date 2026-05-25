@@ -192,6 +192,29 @@ function migrate(db: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS template_feedback_mode_idx ON template_feedback(mode, created_at);
   `);
+
+  // One-time token packs. Pending row created when checkout starts; status
+  // flips to 'completed' on PayPal PAYMENT.CAPTURE.COMPLETED webhook (or via
+  // the synchronous capture call from /api/topup/capture). Status 'failed' is
+  // set if capture errors out so we don't leak quota.
+  //
+  // tokens_added counts toward the user's current `period` quota (YYYY-MM).
+  // Topups expire at period rollover by design — same window as the sub.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS topups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_email TEXT NOT NULL COLLATE NOCASE,
+      period TEXT NOT NULL,            -- 'YYYY-MM'
+      pack_id TEXT NOT NULL,           -- 'small' | 'medium' | 'large'
+      tokens_added INTEGER NOT NULL,
+      price_usd REAL NOT NULL,
+      paypal_order_id TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL,            -- 'pending' | 'completed' | 'failed'
+      created_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS topups_user_period_idx ON topups(user_email, period, status);
+  `);
 }
 
 // One-time import of the old JSON files into SQLite. Marked done in `meta`
