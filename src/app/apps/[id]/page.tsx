@@ -60,7 +60,7 @@ export default async function AppPage({
       srcDoc={injectCsp(html)}
       title="Deployed App"
       className="fixed inset-0 w-full h-full border-0 bg-white"
-      sandbox="allow-scripts allow-modals allow-forms"
+      sandbox="allow-scripts allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
     />
   );
 }

@@ -1166,10 +1166,10 @@ export default function BuilderPage() {
               <div className="h-full w-full sm:max-w-[420px] sm:h-auto sm:aspect-[9/16] sm:max-h-[85vh] rounded-3xl sm:shadow-2xl sm:shadow-black/[0.06] sm:ring-1 sm:ring-black/[0.04] overflow-hidden">
                 <iframe ref={frameA} title="A" className="absolute inset-0 w-full h-full border-0 transition-opacity duration-100"
                   style={{ opacity: active === 0 ? 1 : 0, pointerEvents: active === 0 ? "auto" : "none", zIndex: active === 0 ? 2 : 1 }}
-                  sandbox="allow-scripts allow-modals allow-forms" referrerPolicy="no-referrer" />
+                  sandbox="allow-scripts allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation" referrerPolicy="no-referrer" />
                 <iframe ref={frameB} title="B" className="absolute inset-0 w-full h-full border-0 transition-opacity duration-100"
                   style={{ opacity: active === 1 ? 1 : 0, pointerEvents: active === 1 ? "auto" : "none", zIndex: active === 1 ? 2 : 1 }}
-                  sandbox="allow-scripts allow-modals allow-forms" referrerPolicy="no-referrer" />
+                  sandbox="allow-scripts allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation" referrerPolicy="no-referrer" />
               </div>
             </div>
             {visualEdit && (

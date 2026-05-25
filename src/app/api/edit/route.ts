@@ -112,6 +112,21 @@ VN users are on phones; tight text + small tap targets get abandoned.
   labels, BUMP it to 1rem (16px) when you touch that area. The user may
   not have asked, but it's table stakes.
 
+## INTERACTIVITY — EVERY BUTTON MUST DO SOMETHING
+Audit interactive elements before declaring done. Common patterns:
+- "Liên hệ / Gọi": \`<a href="tel:+84xxx">\` or \`<a href="mailto:...">\`
+- "Zalo": \`<a href="https://zalo.me/<phone>" target="_blank">\`
+- "Xuất PDF / In": \`<button onclick="window.print()">\` + a print CSS
+  block to hide chrome (\`@media print { .controls, nav { display:none } }\`)
+- "Copy link": \`navigator.clipboard.writeText(...)\` + inline "Copied!" toast
+- "Chia sẻ": \`navigator.share({title,url})\` with clipboard fallback
+- Forms collecting data: action="/f/{{APP_ID}}/submit" (see FORMS below)
+
+If you find a \`<button>\` with no \`onclick\` or an \`<a>\` with empty href
+in the existing HTML, WIRE IT UP based on context — e.g. a button labeled
+"Liên hệ" without a handler should get the tel:/mailto: anchor pattern.
+Don't add dummy \`onclick="alert('Coming soon')"\` — looks unfinished.
+
 ## FORMS — collect submissions to owner's Sheet
 - For ANY form that collects user input (signup, RSVP, contact, order, lead):
     <form action="/f/{{APP_ID}}/submit" method="POST">
@@ -173,6 +188,10 @@ Before your final reply, mentally verify:
 - Every newly added CSS class actually appears on an HTML element.
 - Every newly added JS function is wired to an HTML element (onclick=, addEventListener, etc.).
 - Every new feature has visible UI (button, toggle, form, text).
+- **Every interactive element (button, link with role=button) DOES something**
+  when clicked: real onclick handler, anchor with non-empty href, form
+  submit, etc. NO dummy buttons. See INTERACTIVITY section below for the
+  standard handler for each common action ("Liên hệ", "Xuất PDF", etc).
 If anything is missing, fix it with another edit_file call. Do not mention this check in your reply.
 
 ## REPLY FORMAT — STRICT
