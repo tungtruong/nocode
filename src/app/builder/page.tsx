@@ -32,7 +32,15 @@ function cleanHtml(raw: string): string {
 // hosts (Unsplash, picsum.photos, Cloudinary, user-uploaded URLs, etc.).
 // The iframe is still sandboxed with an opaque origin so any "tracker pixel"
 // load can't read or exfil user state — only side effect is the image hit.
-const PREVIEW_CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'">`;
+// form-action allows justvibe.me so generated apps can POST forms to our
+// /f/<id>/submit endpoint. base-uri allows the same so the <base> tag we
+// inject (so relative URLs resolve under a srcdoc with no origin) is honored.
+const PREVIEW_CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'none'; form-action https://justvibe.me; base-uri https://justvibe.me; object-src 'none'">`;
+// Without a <base>, relative URLs in srcdoc resolve to `about:srcdoc/...`
+// which goes nowhere. Inject one pointing at the production domain so the
+// form action="/f/<id>/submit" hits the real server. Deployed apps don't
+// need this — they already have a real domain.
+const PREVIEW_BASE_TAG = `<base href="https://justvibe.me/">`;
 
 // In a sandboxed iframe (no allow-same-origin), localStorage/sessionStorage/cookie
 // access throws SecurityError on every call. AI-generated apps frequently use
@@ -102,12 +110,12 @@ function injectPreviewAnim(html: string): string {
   if (!html) return html;
   return injectIntoHead(
     injectIntoBody(html, PREVIEW_ANIM_SCRIPT),
-    PREVIEW_CSP + PREVIEW_SHIM + PREVIEW_ANIM_STYLE
+    PREVIEW_BASE_TAG + PREVIEW_CSP + PREVIEW_SHIM + PREVIEW_ANIM_STYLE
   );
 }
 function injectPreviewCspOnly(html: string): string {
   if (!html) return html;
-  return injectIntoHead(html, PREVIEW_CSP + PREVIEW_SHIM);
+  return injectIntoHead(html, PREVIEW_BASE_TAG + PREVIEW_CSP + PREVIEW_SHIM);
 }
 function injectIntoHead(html: string, snippet: string): string {
   if (/<head[^>]*>/i.test(html)) return html.replace(/<head([^>]*)>/i, `<head$1>${snippet}`);
