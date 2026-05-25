@@ -41,7 +41,6 @@ export default function DashboardPage() {
   const [redeemBusy, setRedeemBusy] = useState(false);
   const [tier, setTier] = useState<"free" | "pro" | "team">("free");
   const [topupBanner, setTopupBanner] = useState<{ kind: "ok" | "err" | "info"; text: string } | null>(null);
-  const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
 
   const submitRedeem = async () => {
     const code = redeemCode.trim();
@@ -73,16 +72,11 @@ export default function DashboardPage() {
       fetch("/api/apps").then((r) => r.json()),
       fetch("/api/projects").then((r) => r.json()),
       fetch("/api/usage").then((r) => r.ok ? r.json() : null).catch(() => null),
-      fetch("/api/integrations").then((r) => r.ok ? r.json() : null).catch(() => null),
     ])
-      .then(([appsRes, projectsRes, usageRes, integrationsRes]) => {
+      .then(([appsRes, projectsRes, usageRes]) => {
         if (appsRes.apps) setApps(appsRes.apps);
         if (projectsRes.projects) setProjects(projectsRes.projects);
         if (usageRes?.tier) setTier(usageRes.tier);
-        const hasGoogle = integrationsRes?.integrations?.some?.(
-          (i: { provider: string }) => i.provider === "google_sheets",
-        );
-        setGoogleConnected(!!hasGoogle);
         if (appsRes.error || projectsRes.error) {
           setError(appsRes.error || projectsRes.error || t.dashFetchError);
         }
@@ -192,18 +186,6 @@ export default function DashboardPage() {
               >
                 {tier === "pro" ? "★ Pro" : "✦ Max"}
               </span>
-            )}
-            {/* Only show after connection — lazy pattern. Disconnected users
-                discover Google integration via the form auto-create flow, not
-                via header CTAs cluttering the dashboard. */}
-            {googleConnected && (
-              <Link
-                href="/dashboard/integrations"
-                title="Google Sheets đã kết nối — click để quản lý"
-                className="text-xs rounded-lg px-3 py-1.5 font-medium border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
-              >
-                ✓ Sheets
-              </Link>
             )}
             <button onClick={() => setRedeemOpen(true)} className="text-xs rounded-lg border border-[#7c3aed]/20 bg-[#7c3aed]/[0.04] px-3 py-1.5 text-[#7c3aed] hover:bg-[#7c3aed]/[0.08] transition-colors">{t.dashRedeem}</button>
             <button onClick={handleLogout} className="text-xs text-[#64748b] hover:text-[#64748b] transition-colors">{t.signout}</button>

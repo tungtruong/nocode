@@ -4,21 +4,17 @@
 // Anyone (no auth) can POST — that's the point; visitors to the app submit
 // without needing a JustVibe account.
 //
-// Routing:
-//   1. If owner has a sheet bound for this app → append row to their Sheet
-//      (rich, owner-controlled, exports via Drive).
-//   2. Else → fall back to JV's form_submissions table so the data isn't
-//      lost. Dashboard nudges owner to connect Google + migrate.
+// Writes to the shared Supabase `app_rows` table with table_name='submissions'.
+// Owner reads them back from /api/forms/<appId>.
 //
 // Accepts both application/x-www-form-urlencoded (HTML form posts) and JSON.
 // Rate-limited per IP per app to discourage spam.
 
 import { NextRequest, NextResponse } from "next/server";
-import { getApp } from "@/lib/store";
-import { getAppDataSource, type SheetConfig } from "@/lib/integrations";
-import { appendRow } from "@/lib/sheets";
-import { getDb } from "@/lib/db";
 import { checkRateLimit } from "@/lib/security";
+import { ownerOfApp } from "@/lib/app-owner";
+import { insertRow, supabaseConfigured } from "@/lib/supabase";
+import { getDb } from "@/lib/db";
 
 const MAX_FIELD_BYTES = 10_000;
 const MAX_PAYLOAD_FIELDS = 50;
@@ -39,29 +35,16 @@ async function parseBody(req: NextRequest): Promise<Record<string, string>> {
       return out;
     } catch { return {}; }
   }
-  // form-encoded or multipart — use formData() which handles both.
   try {
     const fd = await req.formData();
     const out: Record<string, string> = {};
     for (const [k, v] of fd.entries()) {
       if (Object.keys(out).length >= MAX_PAYLOAD_FIELDS) break;
-      if (typeof v !== "string") continue; // skip File entries
+      if (typeof v !== "string") continue;
       out[k] = v.slice(0, MAX_FIELD_BYTES);
     }
     return out;
   } catch { return {}; }
-}
-
-// Ownership: prefer apps row (deployed); fall back to projects row
-// (form submitting during testing, before deploy).
-async function ownerOf(appId: string): Promise<string | null> {
-  const app = await getApp(appId);
-  if (app) return app.user_email;
-  // Project owner — need projects.user_email lookup via getDb.
-  const row = getDb()
-    .prepare("SELECT user_email FROM projects WHERE id = ?")
-    .get(appId) as { user_email: string } | undefined;
-  return row?.user_email ?? null;
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -73,39 +56,35 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: "Quá nhiều yêu cầu" }, { status: 429 });
   }
 
-  const owner = await ownerOf(appId);
+  const owner = await ownerOfApp(appId);
   if (!owner) return NextResponse.json({ error: "App không tồn tại" }, { status: 404 });
 
   const payload = await parseBody(req);
   if (Object.keys(payload).length === 0) {
     return NextResponse.json({ error: "Form rỗng" }, { status: 400 });
   }
-  // Auto-inject timestamp so the owner can always sort by submission time —
-  // even if the form template doesn't capture it. Auto-create flow creates
-  // a `submitted_at` column to match this.
   if (!payload.submitted_at) payload.submitted_at = new Date().toISOString();
 
-  const source = getAppDataSource<SheetConfig>(appId, "sheet");
-  let storedTo: "sheet" | "fallback" = "fallback";
+  // Annotate with submission metadata visible only to the owner via dashboard.
+  const row = {
+    ...payload,
+    _ip: ip,
+    _ua: (req.headers.get("user-agent") || "").slice(0, 500),
+  };
 
-  if (source) {
+  let storedTo: "supabase" | "fallback" = "fallback";
+  if (supabaseConfigured()) {
     try {
-      await appendRow(
-        source.user_email,
-        source.config.spreadsheetId,
-        source.config.sheetName,
-        payload,
-        source.config.headerRow,
-      );
-      storedTo = "sheet";
+      await insertRow(appId, "submissions", row);
+      storedTo = "supabase";
     } catch (e) {
-      // Sheet write failed (revoked OAuth, sheet deleted, etc) — fall back
-      // so the submission isn't lost. Owner will see a warning next dashboard.
-      console.error("[f/submit] sheet write failed, falling back:", e instanceof Error ? e.message : e);
+      console.error("[f/submit] supabase failed, falling back:", e instanceof Error ? e.message : e);
     }
   }
 
   if (storedTo === "fallback") {
+    // Last-resort: keep the data in JV's own SQLite so a Supabase outage
+    // doesn't lose leads. Dashboard surfaces these as "fallback" rows.
     try {
       getDb()
         .prepare(
@@ -124,8 +103,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     }
   }
 
-  // Honor `?redirect=` for HTML form posts so the browser lands somewhere
-  // sensible after submit (the AI typically gens a thank-you anchor).
+  // Friendly redirect / thanks page for plain <form> posts.
   const url = new URL(req.url);
   const redirect = url.searchParams.get("redirect");
   const accept = req.headers.get("accept") || "";
@@ -133,8 +111,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return NextResponse.redirect(redirect, 303);
   }
   if (accept.includes("text/html") && !accept.includes("application/json")) {
-    // Default plain-HTML thanks page so a vanilla `<form>` POST without JS
-    // doesn't dump the JSON response into the browser.
     return new NextResponse(
       `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Cảm ơn</title><style>body{font-family:system-ui;text-align:center;padding:80px 20px;background:#fafafa;color:#18181b}h1{font-size:32px;margin-bottom:8px}p{color:#71717a;margin-bottom:32px}a{display:inline-block;background:#18181b;color:#fff;padding:12px 24px;border-radius:12px;text-decoration:none;font-weight:500}</style></head><body><h1>✓ Cảm ơn!</h1><p>Đã ghi nhận thông tin của bạn.</p><a href="javascript:history.back()">← Quay lại</a></body></html>`,
       { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } },

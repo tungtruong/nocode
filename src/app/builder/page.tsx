@@ -152,10 +152,6 @@ export default function BuilderPage() {
   const [showModeModal, setShowModeModal] = useState(false);
   const [showFlagModal, setShowFlagModal] = useState(false);
   const [flagSent, setFlagSent] = useState(false);
-  // Reflects whether the user has connected Google Sheets — drives the
-  // "🔌 Kết nối" link color in the header (green = connected). null while
-  // loading so we don't flash the wrong state on mount.
-  const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
   const [newAppName, setNewAppName] = useState("");
   const [savedProjects, setSavedProjects] = useState<SavedProject[]>([]);
   const [input, setInput] = useState("");
@@ -187,27 +183,6 @@ export default function BuilderPage() {
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const bot = useRef<HTMLDivElement>(null);
   const aidRef = useRef("");
-
-  // Poll integration status on mount + when the tab regains focus (catches
-  // the case where the user popped over to /dashboard/integrations to
-  // connect Google then came back here — they'd otherwise see the stale
-  // disconnected color).
-  useEffect(() => {
-    const reload = () => {
-      fetch("/api/integrations")
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-          const has = !!d?.integrations?.some?.(
-            (i: { provider: string }) => i.provider === "google_sheets",
-          );
-          setGoogleConnected(has);
-        })
-        .catch(() => setGoogleConnected(false));
-    };
-    reload();
-    window.addEventListener("focus", reload);
-    return () => window.removeEventListener("focus", reload);
-  }, []);
 
   // Load saved projects from server on mount
   useEffect(() => {
@@ -670,19 +645,6 @@ export default function BuilderPage() {
             <span className="text-base font-bold tracking-tight text-[#0f172a]">JustVibe</span>
           </Link>
           <div className="flex items-center gap-2">
-            {/* Only surface the connection chip when ALREADY connected — for
-                quick visual confirmation. When disconnected, no nag here;
-                the post-deploy toast handles the "you have a form, connect
-                now" prompt at the right moment (lazy connect pattern). */}
-            {googleConnected && (
-              <Link
-                href="/dashboard/integrations"
-                title="Google Sheets đã kết nối — click để quản lý"
-                className="hidden sm:inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 ring-1 ring-emerald-200 transition-all"
-              >
-                ✓ Sheets
-              </Link>
-            )}
             <UsageBadge refreshKey={usageNonce} />
             <LangToggle />
             <button onClick={handleLogout} className="rounded-lg px-2.5 py-1.5 text-xs text-[#64748b] hover:text-[#64748b] hover:bg-[#f1f5f9] transition-all">{t.signout}</button>
@@ -1112,9 +1074,9 @@ export default function BuilderPage() {
           <div className="flex items-start gap-3">
             <div className="text-xl shrink-0">📋</div>
             <div className="flex-1 min-w-0">
-              <h4 className="font-semibold text-sm text-[#18181b] mb-1">App có form — bind sheet để nhận data</h4>
+              <h4 className="font-semibold text-sm text-[#18181b] mb-1">App có form — submission tự lưu vào DB</h4>
               <p className="text-xs text-[#52525b] leading-relaxed mb-3">
-                Form submission sẽ lưu vào Google Sheet trong Drive của bạn. Bind ngay để không miss lead nào.
+                Mỗi lần khách điền form, data tự lưu vào database — xem ngay tại dashboard, export CSV bất cứ lúc nào.
               </p>
               <div className="flex gap-2">
                 <Link
@@ -1122,7 +1084,7 @@ export default function BuilderPage() {
                   className="text-xs rounded-lg bg-[#7c3aed] text-white px-3 py-1.5 hover:bg-[#6d28d9]"
                   onClick={() => setFormNudge(null)}
                 >
-                  Bind sheet →
+                  Xem submissions →
                 </Link>
                 <button
                   onClick={() => setFormNudge(null)}

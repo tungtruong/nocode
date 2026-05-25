@@ -11,15 +11,10 @@ const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
 const GOOGLE_USERINFO = "https://www.googleapis.com/oauth2/v2/userinfo";
 
 // Scope strings exported so callers can compose them without typos.
+// Only LOGIN is used now — Sheets/Drive scopes were removed when we
+// migrated user data storage from Google Sheets to Supabase.
 export const GOOGLE_SCOPES = {
-  // Login basics — what /api/auth/google requests today.
   LOGIN: "openid email profile",
-  // Read + write spreadsheets the user grants us.
-  SHEETS: "https://www.googleapis.com/auth/spreadsheets",
-  // Files the app creates or opens (NOT full drive). Lets us list/open
-  // sheets the user picks for an integration without scary "see all your
-  // Drive files" permission grant.
-  DRIVE_FILE: "https://www.googleapis.com/auth/drive.file",
 } as const;
 
 export function googleConfigured(): boolean {
@@ -41,57 +36,6 @@ export function buildAuthUrl(state: string, redirectUri: string): string {
     prompt: "select_account",
   });
   return `${GOOGLE_AUTH}?${params}`;
-}
-
-// Connect-flow URL builder — used by /api/integrations/google/connect.
-// Differences from login:
-//   - access_type=offline → we get a refresh_token back (only on FIRST
-//     consent unless prompt=consent forces re-issue; we force it).
-//   - prompt=consent → guarantee refresh_token even on subsequent grants
-//     (Google's quirk: re-grant without prompt=consent doesn't return one).
-//   - include_granted_scopes=true → cumulative scopes across grants so
-//     login + sheets work together without re-consenting login basics.
-export function buildConnectUrl(opts: {
-  state: string;
-  redirectUri: string;
-  scopes: string[]; // e.g. [SHEETS, DRIVE_FILE]
-}): string {
-  const params = new URLSearchParams({
-    client_id: process.env.GOOGLE_CLIENT_ID!,
-    redirect_uri: opts.redirectUri,
-    response_type: "code",
-    scope: opts.scopes.join(" "),
-    state: opts.state,
-    access_type: "offline",
-    prompt: "consent",
-    include_granted_scopes: "true",
-  });
-  return `${GOOGLE_AUTH}?${params}`;
-}
-
-// Refresh an access_token using the stored refresh_token. Returns the new
-// access_token + expiry (seconds-from-now). Google doesn't always rotate the
-// refresh_token; if a new one comes back, the caller should persist it.
-export async function refreshAccessToken(refreshToken: string): Promise<{
-  access_token: string;
-  expires_in: number;
-  refresh_token?: string; // rotated, optional
-}> {
-  const r = await fetch(GOOGLE_TOKEN, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: process.env.GOOGLE_CLIENT_ID!,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET!,
-      refresh_token: refreshToken,
-      grant_type: "refresh_token",
-    }),
-  });
-  if (!r.ok) {
-    const body = await r.text().catch(() => "");
-    throw new Error(`refresh ${r.status}: ${body.slice(0, 200)}`);
-  }
-  return (await r.json()) as { access_token: string; expires_in: number; refresh_token?: string };
 }
 
 export interface GoogleUser {
