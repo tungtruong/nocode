@@ -93,13 +93,8 @@ export default function SignupPage() {
               </svg>
               {t.loginFacebook}
             </a>
-            <a
-              href={`/api/auth/zalo?redirect=/builder${ref ? `&ref=${encodeURIComponent(ref)}` : ""}`}
-              className="flex w-full items-center justify-center gap-3 rounded-xl bg-[#0068FF] py-2.5 text-sm font-medium text-white hover:bg-[#0058d4] transition-all shadow-sm"
-            >
-              <span className="text-base font-extrabold tracking-tight">Zalo</span>
-              {t.loginZalo}
-            </a>
+            {/* Zalo OAuth tạm tắt theo chính sách — route + lib (zalo-oauth.ts,
+                /api/auth/zalo/*) vẫn còn để re-enable nhanh khi cần. */}
           </div>
 
           <details className="text-xs text-[#94a3b8]">
