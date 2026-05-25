@@ -193,6 +193,15 @@ export default function BuilderPage() {
   const [deploying, setDeploying] = useState(false);
   const [secs, setSecs] = useState(0);
   const [progress, setProgress] = useState("");
+  // /api/chat creates a `gen_jobs` row at start + sends the id as the first
+  // progress event (`job X`). We stash it here AND in localStorage so a tab
+  // that gets killed mid-stream (mobile background, network blip, reload)
+  // can reconnect via /api/chat/resume/<jobId> and pick up the in-progress
+  // HTML — instead of getting "Load failed" with nothing to show.
+  // (No setter consumer yet — held in localStorage + closure-local var
+  // `streamJobId` is what the resume flow actually reads. Kept here as a
+  // hook point for a future "Đang gen, click để xem job" UI chip.)
+  const [, setCurrentJobId] = useState<string | null>(null);
   // Orchestrator plan sent by /api/chat before generation starts — used to
   // render the "Sẽ tạo X + Y + Z" banner while the model warms up, and to
   // surface AI's proactive suggestions ("Bạn có muốn thêm Realtime?") as
@@ -414,11 +423,17 @@ export default function BuilderPage() {
       if (node) node.srcdoc = force ? injectPreviewAnim(substituted, appId) : injectPreviewCspOnly(substituted, appId);
     };
 
+    // Hoisted out of the try block so the catch can read them when handing
+    // off to the SSE resume path. (askMode picks the right msg-render branch;
+    // streamJobId is what `/api/chat/resume/<jobId>` reconnects against.)
+    let askMode = false;
+    let streamJobId: string | null = null;
+
     try {
       const isFirst = !html;
       // Ask mode only makes sense once an app exists — the question is
       // about THAT app. Force-fallback to Build mode if there's no html yet.
-      const askMode = chatMode === "ask" && !isFirst;
+      askMode = chatMode === "ask" && !isFirst;
 
       // Auto-detect mode from the user's first message before /api/chat. Falls
       // back gracefully if /api/intent errors — we just keep the default mode.
@@ -534,6 +549,20 @@ export default function BuilderPage() {
                 stepKey === "planning" ? "Đang lên kế hoạch..." :
                 stepKey === "done" ? t.buildDone : stepKey;
               setProgress(label);
+            } else if (pl.startsWith("job ")) {
+              // Server created a gen_jobs row — stash the id so we can
+              // reconnect via /api/chat/resume/<jobId> if this stream drops.
+              const jid = pl.slice(4).trim();
+              if (jid) {
+                streamJobId = jid;
+                setCurrentJobId(jid);
+                try {
+                  // localStorage keyed by appId so multiple tabs / projects
+                  // don't trample each other. Cleared on `done` below.
+                  const key = `jv_active_job:${appId || "_new"}`;
+                  localStorage.setItem(key, JSON.stringify({ jobId: jid, aid, startedAt: Date.now() }));
+                } catch { /* private mode or quota — best effort */ }
+              }
             } else if (pl.startsWith("plan ")) {
               // Orchestrator returned mode + caps + suggestions BEFORE the
               // generator started — stash it so the UI can render a banner.
@@ -580,11 +609,48 @@ export default function BuilderPage() {
         setMsgs((p) => p.map((m) => (m.id === aid ? { ...m, text: fin, html: fin } : m)));
       }
       setPhase("done");
+      // Successful end-to-end stream — clear the resume token.
+      try { localStorage.removeItem(`jv_active_job:${appId || "_new"}`); } catch {}
     } catch (e) {
-      if (e instanceof Error && e.name !== "AbortError") {
-        setError(e.message);
+      const isAbort = e instanceof Error && e.name === "AbortError";
+      if (isAbort) {
+        // User explicitly stopped (Cancel button). Do nothing.
+        setPhase("idle");
+      } else if (streamJobId) {
+        // Most likely cause: mobile browser killed the fetch when the tab
+        // went to background, or the connection dropped. The server-side
+        // gen kept running and is writing to gen_jobs — reconnect via SSE
+        // and replay what we missed.
+        setProgress("Mất kết nối — đang nối lại...");
+        try {
+          await resumeJobViaSSE({
+            jobId: streamJobId,
+            aid,
+            askMode,
+            sf,
+            updatePreview,
+            setHtml,
+            setMsgs,
+            setPhase,
+            setLastPlan,
+            setProgress,
+            setActive,
+            siOnDone: si as 0 | 1,
+            t,
+          });
+          try { localStorage.removeItem(`jv_active_job:${appId || "_new"}`); } catch {}
+        } catch (resumeErr) {
+          const m = resumeErr instanceof Error ? resumeErr.message : String(resumeErr);
+          setError(`Mất kết nối + resume thất bại: ${m}. Thử lại lệnh sau.`);
+          setMsgs((p) => p.filter((x) => x.id !== aid));
+          setPhase("idle");
+        }
+      } else {
+        // No jobId means /api/chat errored before sending the `job` event —
+        // nothing to resume from. Behave like before.
+        if (e instanceof Error) setError(e.message);
+        setPhase("idle");
       }
-      setPhase("idle");
     } finally {
       if (timer.current) clearInterval(timer.current);
       abort.current = null;
@@ -1507,6 +1573,96 @@ function FlagTemplateModal(props: {
       </div>
     </div>
   );
+}
+
+// Resume an in-flight /api/chat job over SSE after the original stream
+// dropped (mobile background kill, network blip). The endpoint replays
+// everything the gen has accumulated so far + tails new chunks until the
+// job hits `complete` or `error`. Kept module-level so it can close over
+// nothing from the component — all dependencies passed via the opts object.
+//
+// Resolves on `done` event, rejects on `error` event or connection failure.
+async function resumeJobViaSSE(opts: {
+  jobId: string;
+  aid: string;
+  askMode: boolean;
+  sf: React.RefObject<HTMLIFrameElement | null>;
+  updatePreview: (htmlStr: string, force?: boolean) => void;
+  setHtml: React.Dispatch<React.SetStateAction<string>>;
+  setMsgs: React.Dispatch<React.SetStateAction<Msg[]>>;
+  setPhase: React.Dispatch<React.SetStateAction<Phase>>;
+  setLastPlan: React.Dispatch<React.SetStateAction<{
+    mode: string; caps: string[];
+    suggestions: Array<{ cap: string; reason: string }>;
+    tierWarnings?: Array<{ cap: string; requires: string; current: string }>;
+    source: string;
+  } | null>>;
+  setProgress: (s: string) => void;
+  setActive: React.Dispatch<React.SetStateAction<0 | 1>>;
+  siOnDone: 0 | 1;
+  t: Record<string, string>;
+}): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const url = `/api/chat/resume/${encodeURIComponent(opts.jobId)}`;
+    const es = new EventSource(url, { withCredentials: true });
+    let acc = "";
+
+    es.addEventListener("plan", (ev) => {
+      try {
+        const data = JSON.parse((ev as MessageEvent).data);
+        opts.setLastPlan(data);
+      } catch { /* malformed plan — silently drop */ }
+    });
+
+    es.addEventListener("html", (ev) => {
+      // First `html` event includes everything the gen accumulated before
+      // we reconnected; subsequent events are just-the-deltas. Either way
+      // appending + re-rendering produces correct output.
+      acc += (ev as MessageEvent).data;
+      if (opts.askMode) {
+        opts.setMsgs((p) => p.map((m) => m.id === opts.aid ? { ...m, text: acc, summary: acc } : m));
+      } else {
+        const c2 = cleanHtmlClient(acc);
+        opts.setHtml(c2);
+        opts.updatePreview(c2);
+        opts.setMsgs((p) => p.map((m) => m.id === opts.aid ? { ...m, text: c2, html: c2 } : m));
+      }
+      opts.setProgress("Đang khôi phục...");
+    });
+
+    es.addEventListener("summary", (ev) => {
+      const data = (ev as MessageEvent).data;
+      opts.setMsgs((p) => p.map((m) => m.id === opts.aid ? { ...m, summary: data } : m));
+    });
+
+    es.addEventListener("done", () => {
+      es.close();
+      if (!opts.askMode) {
+        const fin = cleanHtmlClient(acc);
+        opts.updatePreview(fin, true);
+        opts.setHtml(fin);
+        opts.setActive(opts.siOnDone);
+        opts.setMsgs((p) => p.map((m) => m.id === opts.aid ? { ...m, text: fin, html: fin } : m));
+      }
+      opts.setPhase("done");
+      opts.setProgress(opts.t["buildDone"] || "Đã xong");
+      resolve();
+    });
+
+    es.addEventListener("error", (ev) => {
+      // EventSource fires "error" on both transport failures (no data field)
+      // and our explicit `event: error` SSE messages (with data). Disambiguate.
+      const data = (ev as MessageEvent).data;
+      es.close();
+      reject(new Error(typeof data === "string" && data ? data : "Resume connection lost"));
+    });
+  });
+}
+
+// Mirrors src/lib/cleanHtml (server) — strips ```html fences + leading
+// commentary so the preview iframe doesn't render markdown.
+function cleanHtmlClient(s: string): string {
+  return s.replace(/^```html\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```\s*$/i, "");
 }
 
 // === Plan UI bits ===

@@ -138,6 +138,31 @@ function migrate(db: Database.Database) {
       PRIMARY KEY (app_id, key)
     );
 
+    -- Background generation jobs. /api/chat used to die with the request —
+    -- mobile users who switched apps mid-gen lost the whole output. Now
+    -- every gen writes accumulated HTML to this table every couple seconds,
+    -- and clients can resume via /api/chat/resume/<jobId> if the original
+    -- stream drops. Rows are pruned ~24h after completion.
+    --   status: 'streaming' while the server-side gen is still appending,
+    --           'complete' when finished, 'error' on failure.
+    CREATE TABLE IF NOT EXISTS gen_jobs (
+      id                TEXT PRIMARY KEY,
+      user_email        TEXT NOT NULL COLLATE NOCASE,
+      project_id        TEXT,
+      status            TEXT NOT NULL DEFAULT 'streaming',
+      html_accumulated  TEXT NOT NULL DEFAULT '',
+      plan_json         TEXT,
+      summary           TEXT,
+      error_msg         TEXT,
+      created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at      TEXT
+    );
+    CREATE INDEX IF NOT EXISTS gen_jobs_user_idx
+      ON gen_jobs(user_email, created_at DESC);
+    CREATE INDEX IF NOT EXISTS gen_jobs_cleanup_idx
+      ON gen_jobs(updated_at);
+
     -- Custom domains. Owners point their own domain (e.g. shop.example.com)
     -- at us via CNAME → customers.justvibe.me. SSL is handled by Cloudflare
     -- for SaaS — when a domain row is inserted we POST to CF's custom

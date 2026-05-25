@@ -8,6 +8,7 @@ import { logTemplateUsage } from "@/lib/store";
 import { substitutePlaceholders } from "@/lib/html-substitute";
 import { joinDocs, type CapabilityName } from "@/lib/jv-capabilities";
 import { planApp, type AppPlan } from "@/lib/orchestrator";
+import { createJob, setHtml, setPlan, finishJob, finishJobError } from "@/lib/gen-jobs";
 
 // Base prompt for "new app" generation. The DATA / AUTH / FORMS capability
 // sections used to live inline here, but they cost ~1k prompt tokens on EVERY
@@ -227,8 +228,34 @@ export async function POST(req: NextRequest) {
         const sendProgress = (msg: string) => safeEnqueue(encoder.encode(`\x1E${msg}\n`));
         const sendChunk = (s: string) => safeEnqueue(encoder.encode(s));
 
-        // Detect client abort to stop streaming DeepSeek output.
-        req.signal.addEventListener("abort", () => { closed = true; });
+        // IMPORTANT: do NOT mark this stream closed when the client aborts.
+        // Mobile browsers throttle/kill tabs that go to background; if we tore
+        // down generation on every abort, switching apps mid-gen would lose
+        // the whole output. Instead, `closed` only flips when controller.enqueue
+        // throws — meaning the response stream is actually torn down by Node.
+        // The server-side gen keeps running and lands in gen_jobs DB so a
+        // resuming client can pick up where the original stream dropped.
+
+        // Pre-create the background-job row so the very first event the client
+        // sees is the resume token. If anything below this point errors, the
+        // catch block flips status to 'error' — clients can still see the
+        // failure via /api/chat/resume/<jobId>.
+        const jobId = createJob(session.email, projId);
+        sendProgress(`job ${jobId}`);
+
+        // Persist throttle — at most once every 1.5s so we don't hammer SQLite
+        // for every 80-char chunk DeepSeek emits. Final write happens in
+        // finishJob regardless, so brief gaps between the last persist and
+        // 'complete' don't lose data.
+        let lastPersistAt = 0;
+        const persistThrottled = (html: string) => {
+          const now = Date.now();
+          if (now - lastPersistAt < 1500) return;
+          lastPersistAt = now;
+          try { setHtml(jobId, html); } catch (e) {
+            console.warn(`[Chat] persist failed for ${jobId}:`, e instanceof Error ? e.message : e);
+          }
+        };
 
         try {
           sendProgress("progress thinking");
@@ -263,6 +290,10 @@ export async function POST(req: NextRequest) {
               source: plan.source,
             };
             sendProgress(`plan ${encodeURIComponent(JSON.stringify(slimPlan))}`);
+            // Mirror plan into the job row so resuming clients also get the
+            // banner — otherwise they'd reconnect without knowing why the
+            // gen has the caps it does.
+            try { setPlan(jobId, JSON.stringify(slimPlan)); } catch { /* persist failure not fatal */ }
             console.log(`[Chat] caps=${JSON.stringify(chosenCaps)} src=${plan.source} sug=${plan.suggestions.length}`);
           }
           const systemPrompt = usingTemplate
@@ -291,11 +322,15 @@ export async function POST(req: NextRequest) {
           let completionTokens = 0;
           let cachedTokens = 0;
           for await (const chunk of genStream) {
-            if (closed) break;
+            // NB: we no longer break on `closed`. The send-to-client paths
+            // (sendChunk/sendProgress) are no-ops once closed, but we keep
+            // draining the AI stream so the final HTML still lands in DB —
+            // a backgrounded mobile client picks it up via /resume.
             const content = chunk.choices[0]?.delta?.content || "";
             if (content) {
               accumulated += content;
               sendChunk(content);
+              persistThrottled(accumulated);
             }
             // stream_options.include_usage delivers totals in the final chunk
             if (chunk.usage) {
@@ -314,7 +349,9 @@ export async function POST(req: NextRequest) {
           const tokenBudget = perRequestLimit(session.email);
           const overBudget = billedTokens >= tokenBudget;
 
-          if (closed) return;
+          // (Used to early-return when `closed` — removed so the final HTML
+          // still lands in gen_jobs for a resuming client. Sends to the
+          // disconnected client are already no-op via safeEnqueue.)
 
           // Validate full output. Fix only if a critical error makes the HTML un-renderable.
           const cleaned = cleanHtml(accumulated);
@@ -356,7 +393,8 @@ export async function POST(req: NextRequest) {
               let fixCompletion = 0;
               let fixCached = 0;
               for await (const chunk of fixStream) {
-                if (closed) break;
+                // Don't break on `closed` — same reasoning as the main loop:
+                // we want the fixed HTML to land in DB for resume.
                 const content = chunk.choices[0]?.delta?.content || "";
                 if (content) {
                   fixed += content;
@@ -371,11 +409,15 @@ export async function POST(req: NextRequest) {
               const fixBilled = weightedTokens(fixPrompt, fixCompletion, fixCached);
               if (fixBilled > 0) recordUsage(session.email, fixPrompt, fixCompletion, fixCached);
               billedTokens += fixBilled;
-              if (fixed.trim()) accumulated = fixed;
+              if (fixed.trim()) {
+                accumulated = fixed;
+                try { setHtml(jobId, fixed); } catch { /* persist failure not fatal */ }
+              }
             }
           }
 
-          if (closed) return;
+          // (Used to early-return when `closed` — removed so finishJob still
+          // captures the final HTML for resuming clients.)
 
           // Output-side safety scan. If the final HTML looks malicious, replace
           // with a blocked page (and tell client to reset preview first).
@@ -394,12 +436,12 @@ export async function POST(req: NextRequest) {
 
           const contentViolation = scanGeneratedHtml(final);
           if (contentViolation) {
+            const blockedHtml = `<html><body><h1>Content Blocked</h1><p>${contentViolation.reason}</p></body></html>`;
             sendProgress("reset");
-            sendChunk(
-              `<html><body><h1>Content Blocked</h1><p>${contentViolation.reason}</p></body></html>`
-            );
+            sendChunk(blockedHtml);
             sendProgress("progress done");
             safeClose();
+            try { finishJob(jobId, blockedHtml, contentViolation.reason); } catch { /* persist failure not fatal */ }
             return;
           }
 
@@ -442,9 +484,22 @@ export async function POST(req: NextRequest) {
             if (summaryText) {
               sendProgress(`summary ${encodeURIComponent(summaryText.slice(0, 600))}`);
             }
+            // Final persist — captures both the final HTML and the summary so
+            // resuming clients get everything they'd have seen if they stayed
+            // on the page.
+            try { finishJob(jobId, final, summaryText || undefined); } catch { /* persist failure not fatal */ }
           } catch (err) {
             console.error("[Chat] summary error:", err instanceof Error ? err.message : err);
             // Non-fatal — user still sees the app, just without the summary.
+            try { finishJob(jobId, final); } catch { /* persist failure not fatal */ }
+          }
+
+          // Belt-and-braces: if the over-budget branch above skipped the summary
+          // try-block entirely, we still need to finalise the job row.
+          // finishJob is idempotent for the same final HTML (an UPDATE), so
+          // calling it twice doesn't double-write.
+          if (overBudget) {
+            try { finishJob(jobId, final); } catch { /* persist failure not fatal */ }
           }
 
           sendProgress("progress done");
@@ -457,6 +512,7 @@ export async function POST(req: NextRequest) {
             : "Lỗi sinh app. Thử lại nhé.";
           sendProgress(`error ${encodeURIComponent(userMsg)}`);
           safeClose();
+          try { finishJobError(jobId, userMsg); } catch { /* persist failure not fatal */ }
         }
       },
     });
