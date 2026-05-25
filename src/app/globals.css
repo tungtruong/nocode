@@ -20,3 +20,35 @@ body {
   font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+/* Mobile UX baseline (≤ 640px):
+   - All form controls 16px to prevent iOS Safari auto-zoom on focus.
+   - Bump Tailwind's tiniest text utilities so chips/badges/captions
+     don't fall under ~12px (unreadable on most VN phones).
+   - Enlarge tap targets for tiny icon buttons (h-7 / h-8 → 40px floor).
+   The desktop sizing stays unchanged. */
+@media (max-width: 640px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+  .text-xs {
+    font-size: 13px !important;
+    line-height: 1.45 !important;
+  }
+  .text-\[10px\],
+  .text-\[11px\] {
+    font-size: 12px !important;
+  }
+  button,
+  a[role="button"],
+  a.btn,
+  [class*="rounded"][class*="bg-"] {
+    -webkit-tap-highlight-color: rgba(124, 58, 237, 0.15);
+  }
+  button.h-7,
+  button.h-8 {
+    min-height: 40px;
+  }
+}

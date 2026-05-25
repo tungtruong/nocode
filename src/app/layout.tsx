@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { cookies, headers } from "next/headers";
 import { ClientLayout } from "@/components/ClientLayout";
@@ -12,6 +12,15 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "JustVibe — Dựng app không cần code",
   description: "Mô tả ý tưởng. AI dựng web app theo thời gian thực. Một chạm để deploy.",
+};
+
+// Explicit viewport so iOS Safari renders at device width + scales properly.
+// `themeColor` keeps the URL bar tinted to match our brand purple on Android.
+// Do NOT lock initialScale or set maximumScale — pinch-zoom is an a11y need.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#7c3aed",
 };
 
 async function detectLang(): Promise<"vi" | "en"> {
