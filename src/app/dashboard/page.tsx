@@ -170,8 +170,16 @@ export default function DashboardPage() {
             <p className="text-sm text-[#71717a]">{t.dashDesc}</p>
           </div>
           <div className="flex items-center gap-2">
-            <Link href="/dashboard/integrations" className="text-xs rounded-lg border border-[#e8e8ec] bg-white px-3 py-1.5 text-[#52525b] hover:text-[#18181b] hover:bg-[#fafafa] transition-colors">
-              🔌 Kết nối
+            <Link
+              href="/dashboard/integrations"
+              title={googleConnected ? "Google Sheets đã kết nối — click để quản lý" : "Kết nối Google Sheets"}
+              className={`text-xs rounded-lg px-3 py-1.5 font-medium transition-colors border ${
+                googleConnected
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                  : "border-[#e8e8ec] bg-white text-[#52525b] hover:text-[#18181b] hover:bg-[#fafafa]"
+              }`}
+            >
+              {googleConnected ? "✓ Sheets" : "🔌 Kết nối"}
             </Link>
             <button onClick={() => setRedeemOpen(true)} className="text-xs rounded-lg border border-[#7c3aed]/20 bg-[#7c3aed]/[0.04] px-3 py-1.5 text-[#7c3aed] hover:bg-[#7c3aed]/[0.08] transition-colors">{t.dashRedeem}</button>
             <button onClick={handleLogout} className="text-xs text-[#64748b] hover:text-[#64748b] transition-colors">{t.signout}</button>

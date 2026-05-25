@@ -152,6 +152,10 @@ export default function BuilderPage() {
   const [showModeModal, setShowModeModal] = useState(false);
   const [showFlagModal, setShowFlagModal] = useState(false);
   const [flagSent, setFlagSent] = useState(false);
+  // Reflects whether the user has connected Google Sheets — drives the
+  // "🔌 Kết nối" link color in the header (green = connected). null while
+  // loading so we don't flash the wrong state on mount.
+  const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
   const [newAppName, setNewAppName] = useState("");
   const [savedProjects, setSavedProjects] = useState<SavedProject[]>([]);
   const [input, setInput] = useState("");
@@ -183,6 +187,27 @@ export default function BuilderPage() {
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const bot = useRef<HTMLDivElement>(null);
   const aidRef = useRef("");
+
+  // Poll integration status on mount + when the tab regains focus (catches
+  // the case where the user popped over to /dashboard/integrations to
+  // connect Google then came back here — they'd otherwise see the stale
+  // disconnected color).
+  useEffect(() => {
+    const reload = () => {
+      fetch("/api/integrations")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          const has = !!d?.integrations?.some?.(
+            (i: { provider: string }) => i.provider === "google_sheets",
+          );
+          setGoogleConnected(has);
+        })
+        .catch(() => setGoogleConnected(false));
+    };
+    reload();
+    window.addEventListener("focus", reload);
+    return () => window.removeEventListener("focus", reload);
+  }, []);
 
   // Load saved projects from server on mount
   useEffect(() => {
@@ -647,10 +672,20 @@ export default function BuilderPage() {
           <div className="flex items-center gap-2">
             <Link
               href="/dashboard/integrations"
-              title="Kết nối Google Sheets để form lưu data"
-              className="hidden sm:inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs text-[#52525b] hover:text-[#18181b] hover:bg-[#f1f5f9] transition-all"
+              title={
+                googleConnected === null
+                  ? "Đang kiểm tra kết nối..."
+                  : googleConnected
+                    ? "Google Sheets đã kết nối — click để quản lý"
+                    : "Kết nối Google Sheets để form lưu data"
+              }
+              className={`hidden sm:inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
+                googleConnected
+                  ? "text-emerald-700 bg-emerald-50 hover:bg-emerald-100 ring-1 ring-emerald-200"
+                  : "text-[#52525b] hover:text-[#18181b] hover:bg-[#f1f5f9]"
+              }`}
             >
-              🔌 Kết nối
+              {googleConnected ? "✓ Sheets" : "🔌 Kết nối"}
             </Link>
             <UsageBadge refreshKey={usageNonce} />
             <LangToggle />
