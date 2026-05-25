@@ -77,6 +77,25 @@ export default function IntegrationsPage() {
         <h1 className="text-2xl font-bold">{t.integrationsTitle}</h1>
         <p className="mt-2 text-sm text-[#52525b]">{t.integrationsSub}</p>
 
+        {/* Data sovereignty explainer — addresses the #1 question new users
+            ask: "is this MY sheet or JustVibe's?" Short, scannable, with
+            specific concrete points. */}
+        <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 text-xs text-emerald-900">
+          <div className="flex items-start gap-3">
+            <span className="text-base shrink-0">🔒</span>
+            <div className="space-y-1.5">
+              <p className="font-semibold text-emerald-900">Data của bạn nằm trong Drive của bạn — không phải JustVibe</p>
+              <ul className="list-disc pl-4 space-y-0.5 text-emerald-800">
+                <li>Sheet bạn chọn nằm trong Google Drive cá nhân — JustVibe không tạo bản copy</li>
+                <li>JustVibe chỉ giữ <em>refresh token</em> (mã hoá AES-256) để gọi Sheets API thay bạn khi cần</li>
+                <li>Bạn revoke quyền bất cứ lúc nào tại <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-700">Google Account → Quyền truy cập</a></li>
+                <li>Bỏ JustVibe? Sheet + data vẫn còn nguyên trong Drive của bạn — không có lock-in</li>
+                <li>Scope <code className="px-1 bg-emerald-100 rounded">drive.file</code> = JV chỉ thấy file bạn explicitly chọn, KHÔNG thấy toàn bộ Drive</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
         {banner && (
           <div className={`mt-4 rounded-xl px-4 py-2.5 text-xs ${
             banner.kind === "ok"
@@ -120,6 +139,7 @@ export default function IntegrationsPage() {
               ) : (
                 <a
                   href="/api/integrations/google/connect?returnTo=/dashboard/integrations"
+                  title="JustVibe sẽ xin quyền: đọc/ghi sheet bạn chỉ định + tạo file mới (drive.file scope — không thấy toàn bộ Drive)"
                   className="rounded-xl bg-[#18181b] text-white px-4 py-2 text-xs font-medium hover:bg-[#27272a]"
                 >
                   {t.integrationsConnectGoogle}
@@ -208,7 +228,14 @@ function SheetPicker({ bindings, reload }: { bindings: Binding[]; reload: () => 
 
   return (
     <div className="mt-5 border-t border-[#f1f5f9] pt-4">
-      <h3 className="text-sm font-semibold text-[#18181b] mb-2">Sheets của bạn ({sheets.length})</h3>
+      <div className="flex items-baseline justify-between mb-2">
+        <h3 className="text-sm font-semibold text-[#18181b]">
+          Sheets trong Drive của bạn ({sheets.length})
+        </h3>
+        <span className="text-[10px] text-[#94a3b8]" title="Chỉ hiển thị sheet đã được mở/tạo qua JustVibe (drive.file scope)">
+          ⓘ chỉ thấy file đã chia sẻ với JV
+        </span>
+      </div>
       {loadingSheets ? (
         <p className="text-xs text-[#94a3b8]">Đang tải...</p>
       ) : (
@@ -220,13 +247,14 @@ function SheetPicker({ bindings, reload }: { bindings: Binding[]; reload: () => 
             </li>
           ))}
           {sheets.length === 0 && (
-            <li className="text-xs text-[#94a3b8]">Chưa có sheet nào — tạo mới bên dưới hoặc mở 1 sheet bất kỳ qua Drive trước.</li>
+            <li className="text-xs text-[#94a3b8]">Chưa có sheet nào trong scope — tạo mới bên dưới (sẽ tự động cấp quyền).</li>
           )}
         </ul>
       )}
 
       <div className="mt-4 rounded-xl border border-[#e8e8ec] bg-[#fafafa] p-3 space-y-2">
         <h4 className="text-xs font-semibold text-[#18181b]">{t.integrationsCreateNew}</h4>
+        <p className="text-[11px] text-[#71717a] -mt-1">Sheet sẽ được tạo trong Drive của bạn — JustVibe không giữ bản copy.</p>
         <input
           type="text"
           value={newTitle}

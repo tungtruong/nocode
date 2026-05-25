@@ -111,20 +111,27 @@ export default function FormsPage({ params }: { params: Promise<{ id: string }> 
 
         {showBind && <BindSheetPanel appId={appId} onDone={() => { setShowBind(false); reload(); }} />}
 
-        {/* Status banner */}
+        {/* Status banner — make data location crystal clear so user knows
+            where their leads actually live. Different colors per state. */}
         {data?.source === "fallback" && (
           <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-            ⚠️ Chưa bind Google Sheet — submissions đang lưu tạm trong JustVibe ({data.fallbackCount} rows). Bind sheet để chuyển sang owner-owned storage.
+            <div className="font-semibold mb-1">⚠️ Data đang lưu tạm trong JustVibe — không khuyến khích lâu dài</div>
+            <p>Bạn chưa bind Google Sheet cho app này. {data.fallbackCount} submission đang lưu trong DB của JustVibe (giữ tối đa 30 ngày). Bind sheet để chuyển toàn bộ về Drive của bạn.</p>
           </div>
         )}
         {data?.source === "sheet_unreachable" && (
           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
-            ❌ Đã bind sheet nhưng không đọc được (revoked OAuth, sheet bị xoá, hoặc đổi quyền). Xem fallback bên dưới.
+            <div className="font-semibold mb-1">❌ Không truy cập được Sheet của bạn</div>
+            <p>Có thể do: revoke OAuth tại Google, sheet bị xoá/đổi quyền, hoặc đổi tên tab. Submission mới đang tạm lưu trong JustVibe — kiểm tra Sheet hoặc bind lại.</p>
           </div>
         )}
         {data?.source === "sheet" && (
           <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-800">
-            ✓ Data lưu trong Google Sheet của bạn — sheet <span className="font-mono">{data.sheet?.sheetName}</span>
+            <div className="font-semibold mb-1">✓ Data lưu trong Drive của bạn</div>
+            <p>
+              Mỗi submission được append trực tiếp vào sheet <span className="font-mono">{data.sheet?.sheetName}</span> trong Google Drive của bạn.
+              JustVibe không giữ bản copy — bạn xoá sheet là data biến mất hoàn toàn khỏi hệ thống.
+            </p>
           </div>
         )}
 
@@ -213,14 +220,17 @@ function BindSheetPanel({ appId, onDone }: { appId: string; onDone: () => void }
 
   return (
     <div className="mb-4 rounded-xl border border-[#e8e8ec] bg-white p-4">
-      <h3 className="font-semibold text-sm mb-3">Bind sheet cho app này</h3>
+      <h3 className="font-semibold text-sm mb-1">Bind sheet cho app này</h3>
+      <p className="text-[11px] text-[#71717a] mb-3">
+        🔒 Sheet bạn chọn nằm trong Drive cá nhân — JustVibe chỉ append row qua Sheets API. Không copy data sang JV.
+      </p>
       {loading ? (
         <p className="text-xs text-[#94a3b8]">Đang tải...</p>
       ) : needsConnect ? (
         <div>
           <p className="text-xs text-[#52525b] mb-3">Cần kết nối Google trước. Sheet bạn chọn sẽ thành nơi lưu submission.</p>
           <a
-            href="/api/integrations/google/connect?returnTo=/dashboard/forms/{appId}"
+            href={`/api/integrations/google/connect?returnTo=/dashboard/forms/${appId}`}
             className="inline-block rounded-lg bg-[#18181b] text-white text-xs px-4 py-2 hover:bg-[#27272a]"
           >
             Kết nối Google →
@@ -233,7 +243,7 @@ function BindSheetPanel({ appId, onDone }: { appId: string; onDone: () => void }
             onChange={(e) => setPicked(e.target.value)}
             className="w-full rounded-lg border border-[#e8e8ec] bg-white px-3 py-2 text-xs"
           >
-            <option value="">— chọn sheet —</option>
+            <option value="">— chọn sheet (từ Drive của bạn) —</option>
             {sheets.map((s) => (
               <option key={s.spreadsheetId} value={s.spreadsheetId}>{s.title}</option>
             ))}
@@ -246,7 +256,7 @@ function BindSheetPanel({ appId, onDone }: { appId: string; onDone: () => void }
             className="w-full rounded-lg border border-[#e8e8ec] bg-white px-3 py-2 text-xs"
           />
           <p className="text-[11px] text-[#94a3b8]">
-            💡 Sheet cần có header ở dòng 1 (tên cột) để form auto-map fields.
+            💡 Sheet cần có header ở dòng 1 (tên cột) để form auto-map theo <code>name=</code> của input.
           </p>
           <div className="flex gap-2">
             <button
