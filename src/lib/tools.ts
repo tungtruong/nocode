@@ -1,3 +1,5 @@
+import { getCapabilityDocs, isValidCapabilityName, CAPABILITY_NAMES } from "./jv-capabilities";
+
 export interface ToolCall {
   id: string;
   name: string;
@@ -98,6 +100,25 @@ const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    type: "function" as const,
+    function: {
+      name: "get_capability_docs",
+      description:
+        "Fetch full docs + code examples for a JustVibe runtime capability the generated app can use. Capabilities: `forms` (collect submissions), `db` (read/write shared data via window.jv.db), `auth` (per-app end-user login via window.jv.auth). Call this BEFORE writing code that uses jv.db, jv.auth, or /f/<id>/submit forms — the base prompt only summarises them. Cheap (returns ~300-500 tokens once per capability per session).",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            enum: [...CAPABILITY_NAMES],
+            description: "Capability name to fetch docs for.",
+          },
+        },
+        required: ["name"],
+      },
+    },
+  },
 ];
 
 export function getToolDefinitions() {
@@ -108,8 +129,8 @@ export function getToolDefinitions() {
 // the user's question but can't write/edit. Used by /api/ask so questions
 // like "tại sao nút không bấm được?" don't accidentally mutate files.
 export function getReadOnlyToolDefinitions() {
-  return TOOL_DEFINITIONS.filter(
-    (t) => t.function.name === "read_file" || t.function.name === "grep",
+  return TOOL_DEFINITIONS.filter((t) =>
+    ["read_file", "grep", "get_capability_docs"].includes(t.function.name),
   );
 }
 
@@ -138,6 +159,13 @@ export function executeTool(
     case "grep": {
       const pattern = args.pattern as string;
       return grepFiles(files, pattern);
+    }
+    case "get_capability_docs": {
+      const name = String(args.name || "").trim();
+      if (!isValidCapabilityName(name)) {
+        return `Error: unknown capability "${name}". Available: ${CAPABILITY_NAMES.join(", ")}`;
+      }
+      return getCapabilityDocs(name);
     }
     default:
       return `Unknown tool: ${toolName}`;

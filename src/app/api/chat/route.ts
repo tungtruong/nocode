@@ -6,8 +6,15 @@ import { assertQuota, recordUsage, perRequestLimit, weightedTokens } from "@/lib
 import { APP_MODES, modeOf, type ModeId } from "@/lib/modes";
 import { logTemplateUsage } from "@/lib/store";
 import { substitutePlaceholders } from "@/lib/html-substitute";
+import { joinDocs, type CapabilityName } from "@/lib/jv-capabilities";
+import { classifyCapabilities } from "@/lib/capability-classifier";
 
-const NEW_APP_PROMPT = `## ROLE
+// Base prompt for "new app" generation. The DATA / AUTH / FORMS capability
+// sections used to live inline here, but they cost ~1k prompt tokens on EVERY
+// generation — wasted on the 50%+ of apps that are pure-static (CV, wedding
+// invite, calculator, simple landing). We now classify the user's request
+// upfront and concatenate only the relevant capability docs below this base.
+const NEW_APP_PROMPT_BASE = `## ROLE
 You are a web app generator. Build ONE complete single-file HTML app matching the user's description.
 
 ## OUTPUT FORMAT — STRICT
@@ -81,86 +88,22 @@ element in your output, decide what it does up-front and wire it:
 NEVER leave an \`<button>\` without an onclick OR an \`<a>\` with empty
 href. Both look broken in preview when the user tests.
 
-## FORMS — IMPORTANT
-- For any form that COLLECTS data (signup, contact, RSVP, order, lead capture), use:
-    <form action="/f/{{APP_ID}}/submit" method="POST">
-      <input name="email" ...>
-      ...
-    </form>
-- Submissions are stored automatically — owner reads them in the dashboard.
-- Each input MUST have a \`name\` attribute — used as the field key in storage.
-- Keep \`{{APP_ID}}\` literal in your output. Server substitutes it.
-- After submit, server returns a friendly HTML thank-you page automatically —
-  do NOT add an \`onsubmit\` handler with \`alert()\` or \`preventDefault()\`.
-- For "open in new tab", add \`target="_blank"\` to the form.
-- DO NOT add any badge / footer text mentioning the storage backend
-  (no "Powered by Google Sheets", "Saved to Database", "Connected to ..."
-  etc). The persistence is invisible infrastructure to the end-user.
-
-## DATA — READING SHARED DATA (\`window.jv.db\`)
-Generated apps run inside a runtime that exposes \`window.jv.db\`. Use it when the
-user wants a "catalog / menu / list / listing / news / events / products / staff"
-view whose content the OWNER will manage (not visitors).
-
-API (Promises):
-  await jv.db.list('products')                         // newest 100
-  await jv.db.list('products', { limit: 12 })
-  await jv.db.list('products', { where: { featured: true }, orderAsc: true })
-  await jv.db.find('products', { slug: 'cafe-sua' })   // single object or null
-  await jv.db.count('orders')
-
-Each returned row is a plain object whose keys are owner-defined plus:
-  _id          — row UUID
-  _createdAt   — ISO timestamp
-
-Rules:
-- Pick a clear, lowercase, plural \`table\` name (e.g. \`products\`, \`menu_items\`,
-  \`listings\`, \`events\`, \`team\`). Stay consistent — do NOT mix \`product\` and \`products\`.
-- NEVER use \`submissions\` as a list source — that's reserved for owner-private form data.
-- Render with sensible empty state ("Chưa có dữ liệu — chủ shop hãy mở Dashboard
-  để thêm sản phẩm.") in case the owner hasn't populated yet.
-- DOM ready pattern:
-    document.addEventListener('DOMContentLoaded', async () => {
-      const items = await jv.db.list('products', { limit: 24 });
-      const grid = document.getElementById('grid');
-      grid.innerHTML = items.map(p => \\\`<article>...\${p.name}...\${p.price}...</article>\\\`).join('') || '<p>Chưa có dữ liệu</p>';
-    });
-- Skip \`jv.db\` entirely for static pages (CV, wedding invite, landing) — only use it when content really needs to be dynamic.
-
-## AUTH — END-USER LOGIN (\`window.jv.auth\` + per-user \`jv.db\`)
-The runtime also ships an end-user auth system (Google OAuth). Use it ONLY when
-the app needs per-user data (journal / notes / personal todo / bookmarks /
-"my orders" / membership content). DO NOT add auth to a marketing landing
-or a catalog browse view — those don't need login.
-
-API:
-  await jv.auth.user()              // → { uid, email, name, picture } or null
-  jv.auth.signIn(/* returnUrl? */)  // top-nav redirect to Google + back
-  await jv.auth.signOut()           // clear cookie, then reload page
-
-Authenticated writes (current user becomes the row's owner):
-  await jv.db.add('notes', { title: '...', body: '...' })       // tag user_id auto
-  await jv.db.update('notes', noteId, { body: '...new...' })    // own row only
-  await jv.db.remove('notes', noteId)                           // own row only
-
-Per-user read (server substitutes the current uid):
-  const mine = await jv.db.list('notes', { where: { user_id: '@me' } })
-
-Patterns:
-- On page load, call \`jv.auth.user()\` first. If \`null\` → show "Đăng nhập với
-  Google" button calling \`jv.auth.signIn()\`. If user → show profile chip with
-  avatar + name + "Đăng xuất" button calling \`jv.auth.signOut().then(() => location.reload())\`.
-- Wrap user-data fetches in \`if (await jv.auth.user()) { ... }\` so a logged-out
-  visitor doesn't see "Cần đăng nhập" errors in their console.
-- The injected runtime handles cookies + redirects. Do NOT add your own OAuth
-  buttons, Google SDK loads, or login forms.
-
 ## DO NOT
 - Do not include analytics, tracking, external CDN scripts unless explicitly requested.
 - Do not add features (auth, settings, theme toggle, export) unless the user asks.
 - Do not output Lorem Ipsum — use realistic Vietnamese sample data when content is needed.
 
 START NOW with <!DOCTYPE html>`;
+
+/**
+ * Build the new-app system prompt by gluing the base + per-capability docs.
+ * For static apps (caps=[]), this returns just the base — saving ~1k tokens
+ * of prompt vs. the always-inline previous version.
+ */
+function buildNewAppPrompt(caps: readonly CapabilityName[]): string {
+  if (caps.length === 0) return NEW_APP_PROMPT_BASE;
+  return `${NEW_APP_PROMPT_BASE}\n\n${joinDocs(caps)}`;
+}
 
 // Used when a niche mode (qr_menu, wedding, ...) has a template skeleton. The
 // model receives the template + user request and FILLS placeholders rather
@@ -297,9 +240,22 @@ export async function POST(req: NextRequest) {
           //     template skeleton in the user message; tighter token budget
           //     since the model only fills placeholders, not the whole doc.
           const usingTemplate = !!modeDef.template;
+          // Niche templates (qr_menu/wedding/...) have known capability needs
+          // baked in — e.g. qr_menu always needs forms + db. The classifier is
+          // only useful for the generic "web_app" mode where the user's free
+          // prompt determines what's needed.
+          let chosenCaps: CapabilityName[] = [];
+          if (usingTemplate) {
+            chosenCaps = modeDef.capabilities ?? [];
+          } else {
+            sendProgress("progress classifying");
+            const pick = await classifyCapabilities(newMessage, session.email);
+            chosenCaps = pick.caps;
+            console.log(`[Chat] caps=${JSON.stringify(chosenCaps)} src=${pick.source}`);
+          }
           const systemPrompt = usingTemplate
-            ? `${TEMPLATE_FILL_PROMPT}\n\n${modeDef.systemHints}`
-            : NEW_APP_PROMPT;
+            ? `${TEMPLATE_FILL_PROMPT}\n\n${modeDef.systemHints}${chosenCaps.length ? `\n\n${joinDocs(chosenCaps)}` : ""}`
+            : buildNewAppPrompt(chosenCaps);
           const userPrompt = usingTemplate
             ? `TEMPLATE:\n${modeDef.template}\n\nUSER REQUEST: ${newMessage}`
             : newMessage;
@@ -368,8 +324,8 @@ export async function POST(req: NextRequest) {
 
               const { stream: fixStream } = await createStreamWithFallback({
                 messages: [
-                  { role: "system", content: NEW_APP_PROMPT },
-                  { role: "user", content: newMessage },
+                  { role: "system", content: systemPrompt },
+                  { role: "user", content: userPrompt },
                   { role: "assistant", content: accumulated },
                   {
                     role: "user",

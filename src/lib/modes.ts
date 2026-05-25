@@ -33,6 +33,11 @@ export interface ModeDef {
   // Vietnamese + English keywords used by the classifier's keyword
   // short-circuit (skip the LLM call when match ≥ 2).
   keywords: string[];
+  // JustVibe runtime capabilities the template wants pre-loaded. For
+  // template-mode generation we skip the LLM capability classifier (the
+  // template's needs are well-known up-front) and just inject these docs.
+  // Empty = static template (CV / wedding invite — no jv.* helpers).
+  capabilities?: import("./jv-capabilities").CapabilityName[];
 }
 
 export const DEFAULT_MODE: ModeId = "web_app";
@@ -423,6 +428,8 @@ export const APP_MODES: Record<ModeId, ModeDef> = {
     systemHints: HINTS_QR_MENU,
     template: TEMPLATE_QR_MENU,
     keywords: ["menu", "thực đơn", "quán", "cafe", "cà phê", "nhà hàng", "restaurant", "đồ ăn", "đồ uống", "F&B", "trà sữa"],
+    // menu items live in jv.db so owner can edit prices; order form goes to /f/<id>/submit.
+    capabilities: ["forms", "db"],
   },
   wedding: {
     id: "wedding",
@@ -432,6 +439,8 @@ export const APP_MODES: Record<ModeId, ModeDef> = {
     systemHints: HINTS_WEDDING,
     template: TEMPLATE_WEDDING,
     keywords: ["cưới", "thiệp cưới", "thiệp mời", "đám cưới", "lễ cưới", "wedding", "vu quy", "tân hôn", "mời cưới"],
+    // RSVP form to /f/<id>/submit; no db (static invite).
+    capabilities: ["forms"],
   },
   landing: {
     id: "landing",
@@ -441,6 +450,8 @@ export const APP_MODES: Record<ModeId, ModeDef> = {
     systemHints: HINTS_LANDING,
     template: TEMPLATE_LANDING,
     keywords: ["landing", "landing page", "trang chủ", "marketing", "lead", "thu lead", "ra mắt", "giới thiệu sản phẩm", "khóa học"],
+    // Lead capture form.
+    capabilities: ["forms"],
   },
   pitch_deck: {
     id: "pitch_deck",
@@ -450,6 +461,8 @@ export const APP_MODES: Record<ModeId, ModeDef> = {
     systemHints: HINTS_PITCH_DECK,
     template: TEMPLATE_PITCH_DECK,
     keywords: ["pitch", "deck", "slide", "thuyết trình", "presentation", "gọi vốn", "seed round", "investor"],
+    // Pure static slides.
+    capabilities: [],
   },
   cv_resume: {
     id: "cv_resume",
@@ -459,6 +472,8 @@ export const APP_MODES: Record<ModeId, ModeDef> = {
     systemHints: HINTS_CV_RESUME,
     template: TEMPLATE_CV_RESUME,
     keywords: ["cv", "resume", "hồ sơ", "portfolio", "lý lịch", "xin việc", "ứng tuyển"],
+    // Static personal page.
+    capabilities: [],
   },
 };
 
