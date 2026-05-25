@@ -37,7 +37,7 @@ export default function PricingPage() {
     {
       tier: "pro",
       name: t.planPro,
-      price: "12",
+      price: "14.99",
       desc: t.planProDesc,
       features: features.planProFeatures as readonly string[],
       cta: t.planProCTA,
@@ -46,7 +46,7 @@ export default function PricingPage() {
     {
       tier: "team",
       name: t.planTeam,
-      price: "39",
+      price: "39.99",
       desc: t.planTeamDesc,
       features: features.planTeamFeatures as readonly string[],
       cta: t.planTeamCTA,

@@ -96,7 +96,7 @@ export const t = {
       "Hỗ trợ ưu tiên qua email (24-48h)",
     ],
     planTeamFeatures: [
-      "60 triệu token / tháng — **5,5× Pro chỉ với 3,25× giá**",
+      "60 triệu token / tháng — **5,5× Pro chỉ với 2,7× giá**",
       "Tối đa 25M token mỗi yêu cầu (xử lý dashboard phức tạp 1 lần)",
       "22 lượt chỉnh sửa mỗi yêu cầu",
       "Dự án nháp không giới hạn · 200 app deploy",
@@ -107,7 +107,7 @@ export const t = {
     ],
     pricingCacheNote: "Tất cả gói đều hưởng giảm giá từ prompt cache — token cache hit chỉ tính ~5% giá thường. Dùng càng nhiều trong cùng phiên thì quota tiêu càng chậm (thực tế hiệu quả 5-10× so với tính thô).",
     pricingPaymentNote: "Thanh toán qua PayPal. Hủy bất cứ lúc nào, không phí thoát.",
-    pricingValueHighlight: "Pro → Max: 5,5× token với 3,25× giá. Tức 1,7× nhiều hơn cho mỗi đô bạn trả.",
+    pricingValueHighlight: "Pro → Max: 5,5× token chỉ với 2,7× giá. Tức 2× nhiều token hơn cho mỗi đô bạn trả.",
     pricingFAQTitle: "Hỏi đáp nhanh",
     pricingFAQ1Q: "Token là gì? Tính thế nào?",
     pricingFAQ1A: "Token là đơn vị AI tính cost. 1 từ tiếng Việt thường ~2-3 token. App nhỏ (counter, tip calculator) ~30-50K token. App vừa (todo có nhiều tính năng) ~100-300K token. App phức tạp (dashboard có chart) ~300K-1M token. Hệ thống tính theo weighted: input + output × 4 (output đắt hơn 4×).",
@@ -116,7 +116,7 @@ export const t = {
     pricingFAQ3Q: "Nếu hết quota giữa tháng?",
     pricingFAQ3A: "App hiện tại không bị xoá, chỉ không tạo/sửa được app mới cho đến đầu tháng sau. Có thể nâng cấp gói ngay để quota reset không cần đợi.",
     pricingFAQ4Q: "Tại sao nên nâng từ Pro lên Max?",
-    pricingFAQ4A: "Max cho 60M token (5,5× Pro) với giá $39 (3,25× Pro). Hiệu quả token/đô tốt hơn Pro 1,7×. Kèm hoàn tiền 14 ngày + hỗ trợ < 4h + dự án không giới hạn. Hợp khi bạn dựng > 5 app/tháng hoặc làm app phức tạp (admin dashboard, app có chart, app có nhiều tab).",
+    pricingFAQ4A: "Max cho 60M token (5,5× Pro) với giá $39.99 (2,7× Pro). Hiệu quả token/đô tốt hơn Pro 2×. Kèm hoàn tiền 14 ngày + hỗ trợ < 4h + dự án không giới hạn. Hợp khi bạn dựng > 5 app/tháng hoặc làm app phức tạp (admin dashboard, app có chart, app có nhiều tab).",
     pricingFAQ5Q: "Có thể hủy gói bất cứ lúc nào?",
     pricingFAQ5A: "Có. Vào dashboard → hủy gói. Bạn vẫn dùng quota đến hết kỳ thanh toán hiện tại, sau đó tự động về Free. Không tính phí thoát.",
 
@@ -356,7 +356,7 @@ export const t = {
       "Priority email support (24-48h)",
     ],
     planTeamFeatures: [
-      "60M tokens / month — **5.5× Pro for only 3.25× the price**",
+      "60M tokens / month — **5.5× Pro for only 2.7× the price**",
       "Up to 25M tokens per request (complex dashboards in one shot)",
       "22 edit turns per request",
       "Unlimited draft projects · 200 deployed apps",
@@ -367,7 +367,7 @@ export const t = {
     ],
     pricingCacheNote: "Every plan benefits from prompt caching — cache-hit tokens cost ~5% of full price. The more you reuse the same context within a session, the slower your quota drains (5-10× more effective in practice vs raw pricing).",
     pricingPaymentNote: "Payments via PayPal. Cancel any time, no exit fees.",
-    pricingValueHighlight: "Pro → Max: 5.5× tokens for 3.25× the price. That's 1.7× more for every dollar you pay.",
+    pricingValueHighlight: "Pro → Max: 5.5× tokens for only 2.7× the price. That's 2× more for every dollar you pay.",
     pricingFAQTitle: "Quick FAQ",
     pricingFAQ1Q: "What is a token? How is it counted?",
     pricingFAQ1A: "A token is the unit AI bills on. One short word is roughly 2-3 tokens. A small app (counter, tip calculator) ~30-50K tokens. A medium app (feature-rich todo) ~100-300K tokens. A complex app (charted dashboard) ~300K-1M. We bill in weighted tokens: input + output × 4 (output is 4× more expensive than input).",
@@ -376,7 +376,7 @@ export const t = {
     pricingFAQ3Q: "What happens if I run out of quota mid-month?",
     pricingFAQ3A: "Existing apps are not deleted — you just can't create or edit new ones until the next billing cycle. Upgrading immediately resets the quota so you don't have to wait.",
     pricingFAQ4Q: "Why upgrade from Pro to Max?",
-    pricingFAQ4A: "Max gives 60M tokens (5.5× Pro) for $39 (3.25× Pro). That's 1.7× more tokens per dollar. Plus 14-day refund, < 4h support, unlimited drafts. Worth it if you ship 5+ apps per month or build complex apps (admin dashboards, charts, multi-tab).",
+    pricingFAQ4A: "Max gives 60M tokens (5.5× Pro) for $39.99 (2.7× Pro). That's 2× more tokens per dollar. Plus 14-day refund, < 4h support, unlimited drafts. Worth it if you ship 5+ apps per month or build complex apps (admin dashboards, charts, multi-tab).",
     pricingFAQ5Q: "Can I cancel anytime?",
     pricingFAQ5A: "Yes. Go to dashboard → cancel. You keep the quota until the end of the current billing period, then drop back to Free automatically. No exit fees.",
 

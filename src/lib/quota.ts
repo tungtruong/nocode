@@ -19,14 +19,17 @@ export type Tier = "free" | "pro" | "team";
 //   → CACHED_TO_INPUT_RATIO = 0.014 / 0.27 ≈ 0.052
 //
 // Cost per weighted token (= cache-miss input token cost): $0.27 / 1M.
-// Paid plans sized so price covers DeepSeek cost with a 4× gross margin:
+// Plans sized so the worst-case (no cache) cost stays below the gross margin
+// target. Real cost is much lower because prompt caching gives ~5-10×
+// effective discount on multi-turn flows.
 //
-//   Plan   Price/mo   Cost target (price/4)   Weighted-token budget
-//   Free   $0         — (subsidized)          1,000,000
-//   Pro    $12        $3                      $3   / $0.27/M = 11,000,000
-//   Team   $39        $9.75                   $9.75/ $0.27/M = 36,000,000
+//   Plan   Price/mo   Weighted budget     Worst-case cost   Gross margin
+//   Free   $0         300,000             $0.08             —
+//   Pro    $14.99     11,000,000          $2.97             5.0×
+//   Max    $39.99     60,000,000          $16.20            2.5× (worst-case)
 //
-// Recalibrate when DeepSeek rates or the fallback (OpenAI) mix changes.
+// Topup packs (one-time) are priced 2-3× above the matching sub's per-token
+// rate so they don't cannibalize subscriptions — see TOPUP_PACKS.
 export const INPUT_RATE_PER_TOKEN = 0.27 / 1_000_000;          // USD per cache-miss input token
 export const CACHED_INPUT_RATE_PER_TOKEN = 0.014 / 1_000_000;  // USD per cache-hit input token
 export const OUTPUT_RATE_PER_TOKEN = 1.10 / 1_000_000;         // USD per output token
