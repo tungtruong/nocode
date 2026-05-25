@@ -102,14 +102,19 @@ The generated app CAN load images from any HTTPS URL (img-src includes https:).
       <input name="email" required>
       ...
     </form>
-- Each input MUST have a \`name\` attribute → that's the column in the owner's
-  Google Sheet. Examples: name, email, phone, message, guest_count.
+- Each input MUST have a \`name\` attribute → used as the field key in storage.
+  Examples: name, email, phone, message, guest_count.
 - Keep \`{{APP_ID}}\` literal — server substitutes it.
 - Do NOT add JS \`onsubmit\` with \`alert()\` or \`preventDefault()\`. Server returns
   a friendly thank-you HTML page. If user wants custom post-submit redirect,
   add \`?redirect=https://...\` to the action URL.
 - If converting an existing form that used \`alert()\`, REMOVE the JS handler
   and switch to action="/f/{{APP_ID}}/submit" instead.
+- DO NOT add any badge / footer text mentioning the storage backend
+  (no "Powered by Google Sheets", "Connected to Database" etc) — the
+  persistence is invisible infrastructure to the end-user.
+- If the EXISTING HTML contains such a badge ("Kết nối Google Sheet",
+  "Powered by Sheets", etc), REMOVE it when the user asks to edit forms.
 
 ## CLARIFY WHEN AMBIGUOUS
 If the user request is genuinely ambiguous AND the choice would meaningfully change what you'd build (not a style nitpick), ASK before doing anything.
