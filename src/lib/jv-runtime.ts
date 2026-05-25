@@ -36,6 +36,7 @@ export const JV_RUNTIME_VERSION = "1";
 //   jv.auth.signOut()                            // clears cookie, reload optional
 //   jv.files.upload(File)                        // {key, url, size_bytes, mime} (auth required)
 //   jv.realtime.subscribe(table, handler, opts?) // {close} — SSE of INSERT/UPDATE/DELETE
+//   jv.payment.vietqr({amount, description, ...}) // {url, qrUrl, jsonUrl, info}
 //
 // All write/auth calls send credentials so the per-app session cookie
 // (`__jv_au_<appId>` on .justvibe.me) reaches the API origin cross-subdomain.
@@ -114,13 +115,34 @@ const RUNTIME_BODY = `(function(){
         es.addEventListener("db", function(ev){
           try { handler(JSON.parse(ev.data)); } catch (e) { /* malformed payload */ }
         });
-        // Surface server-side errors (e.g. channel torn down) so the app can
-        // re-subscribe. EventSource auto-reconnects on transport errors.
         es.addEventListener("error", function(ev){
           var d; try { d = JSON.parse(ev.data); } catch (e) { d = null; }
           if (d && opts.onError) opts.onError(d);
         });
         return { close: function(){ es.close(); } };
+      }
+    },
+    payment: {
+      vietqr: function(opts){
+        opts = opts || {};
+        var p = new URLSearchParams();
+        if (opts.amount) p.set("amount", String(opts.amount));
+        if (opts.description) p.set("description", opts.description);
+        if (opts.bank) p.set("bank", opts.bank);
+        if (opts.account) p.set("account", opts.account);
+        if (opts.name) p.set("name", opts.name);
+        var qs = p.toString();
+        var base = API + "/api/payment/" + encodeURIComponent(APP_ID) + "/vietqr";
+        var imgUrl = base + (qs ? "?" + qs : "");
+        return {
+          url: imgUrl,
+          qrUrl: imgUrl,
+          jsonUrl: base + (qs ? "?" + qs + "&format=json" : "?format=json"),
+          info: {
+            amount: opts.amount || null,
+            description: opts.description || null,
+          }
+        };
       }
     }
   };

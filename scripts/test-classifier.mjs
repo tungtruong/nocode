@@ -48,6 +48,11 @@ const CASES = [
   ["Kitchen display system — nhà bếp xem đơn mới real-time", ["db", "realtime"]],
   ["Poll voting có counter cập nhật trực tiếp khi vote", ["db", "realtime"]],
   ["Multiplayer typing game", ["db", "realtime"]],
+
+  // payment capability — VietQR
+  ["Trang nhận đặt bàn cafe — khách cọc 50k trước", ["forms", "payment"]],
+  ["Tip jar trang cá nhân — khách donate qua chuyển khoản", ["payment"]],
+  ["Bán vé sự kiện workshop — khách chọn vé rồi quét QR chuyển khoản", ["db", "payment"]],
 ];
 
 let pass = 0;

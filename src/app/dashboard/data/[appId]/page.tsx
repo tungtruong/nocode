@@ -31,7 +31,7 @@ interface FileItem {
 
 export default function DataPage({ params }: { params: Promise<{ appId: string }> }) {
   const { appId } = use(params);
-  const [tab, setTab] = useState<"tables" | "files">("tables");
+  const [tab, setTab] = useState<"tables" | "files" | "payment">("tables");
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [selected, setSelected] = useState<string>("");
   const [newTableInput, setNewTableInput] = useState("");
@@ -49,6 +49,11 @@ export default function DataPage({ params }: { params: Promise<{ appId: string }
   const [uploading, setUploading] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [vietqr, setVietqr] = useState<{ bankBin: string; accountNo: string; accountName: string } | null>(null);
+  const [vietqrDraft, setVietqrDraft] = useState({ bankBin: "970436", accountNo: "", accountName: "" });
+  const [vietqrSaving, setVietqrSaving] = useState(false);
+  const [vietqrSaved, setVietqrSaved] = useState(false);
+  const [vietqrVersion, setVietqrVersion] = useState(0);
 
   const loadTables = useCallback(async () => {
     setLoadingTables(true);
@@ -155,6 +160,68 @@ export default function DataPage({ params }: { params: Promise<{ appId: string }
     navigator.clipboard.writeText(url);
     setCopied(url);
     setTimeout(() => setCopied(null), 1500);
+  };
+
+  const loadVietQr = useCallback(async () => {
+    setError("");
+    try {
+      const r = await fetch(`/api/payment/${appId}/config`);
+      if (!r.ok) throw new Error((await r.json()).error || "Load failed");
+      const d = await r.json();
+      setVietqr(d.vietqr);
+      if (d.vietqr) setVietqrDraft(d.vietqr);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Lỗi");
+    }
+  }, [appId]);
+
+  useEffect(() => {
+    if (tab === "payment") queueMicrotask(() => { loadVietQr(); });
+  }, [tab, loadVietQr]);
+
+  const saveVietQr = async () => {
+    setVietqrSaving(true);
+    setError("");
+    setVietqrSaved(false);
+    try {
+      const accountNo = vietqrDraft.accountNo.replace(/\s/g, "");
+      if (!/^\d{6,30}$/.test(accountNo)) throw new Error("STK phải là 6-30 chữ số");
+      if (!vietqrDraft.accountName.trim()) throw new Error("Cần tên chủ tài khoản");
+      const r = await fetch(`/api/payment/${appId}/config`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ vietqr: { ...vietqrDraft, accountNo } }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error || "Lưu thất bại");
+      setVietqr({ ...vietqrDraft, accountNo });
+      setVietqrSaved(true);
+      setVietqrVersion((v) => v + 1);
+      setTimeout(() => setVietqrSaved(false), 2000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Lỗi");
+    } finally {
+      setVietqrSaving(false);
+    }
+  };
+
+  const removeVietQr = async () => {
+    if (!confirm("Xoá cấu hình bank? Sau đó app không tạo được QR.")) return;
+    setVietqrSaving(true);
+    setError("");
+    try {
+      const r = await fetch(`/api/payment/${appId}/config`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ vietqr: null }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error || "Xoá thất bại");
+      setVietqr(null);
+      setVietqrVersion((v) => v + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Lỗi");
+    } finally {
+      setVietqrSaving(false);
+    }
   };
 
   const addRow = async () => {
@@ -265,6 +332,14 @@ export default function DataPage({ params }: { params: Promise<{ appId: string }
             }`}
           >
             📁 File upload <span className="text-[10px] text-[#94a3b8]">jv.files</span>
+          </button>
+          <button
+            onClick={() => setTab("payment")}
+            className={`px-4 py-2 text-sm font-medium transition border-b-2 ${
+              tab === "payment" ? "border-[#7c3aed] text-[#7c3aed]" : "border-transparent text-[#71717a] hover:text-[#18181b]"
+            }`}
+          >
+            💳 Thanh toán <span className="text-[10px] text-[#94a3b8]">jv.payment</span>
           </button>
         </div>
 
@@ -474,6 +549,95 @@ export default function DataPage({ params }: { params: Promise<{ appId: string }
         </div>
         )}
 
+        {tab === "payment" && (
+        <div className="grid md:grid-cols-2 gap-5">
+          <div className="rounded-2xl border border-[#e8e8ec] bg-white p-5">
+            <h3 className="text-base font-semibold mb-1">Cấu hình VietQR</h3>
+            <p className="text-xs text-[#52525b] mb-4">
+              App của bạn sẽ tạo QR chuyển khoản về tài khoản này. Người dùng mở app banking → quét → chuyển khoản trực tiếp, không tốn phí.
+            </p>
+
+            <label className="block text-xs font-semibold text-[#52525b] mb-1">Ngân hàng</label>
+            <select
+              value={vietqrDraft.bankBin}
+              onChange={(e) => setVietqrDraft({ ...vietqrDraft, bankBin: e.target.value })}
+              className="w-full text-sm px-3 py-2 mb-3 rounded-lg border border-[#e8e8ec] bg-white"
+            >
+              {VN_BANKS_OPTIONS.map((b) => (
+                <option key={b.bin} value={b.bin}>{b.name} ({b.code})</option>
+              ))}
+            </select>
+
+            <label className="block text-xs font-semibold text-[#52525b] mb-1">Số tài khoản</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={vietqrDraft.accountNo}
+              onChange={(e) => setVietqrDraft({ ...vietqrDraft, accountNo: e.target.value.replace(/\D/g, "") })}
+              placeholder="1031234567"
+              className="w-full text-sm px-3 py-2 mb-3 rounded-lg border border-[#e8e8ec]"
+            />
+
+            <label className="block text-xs font-semibold text-[#52525b] mb-1">Tên chủ TK (không dấu)</label>
+            <input
+              type="text"
+              value={vietqrDraft.accountName}
+              onChange={(e) => setVietqrDraft({ ...vietqrDraft, accountName: e.target.value })}
+              placeholder="NGUYEN VAN A"
+              className="w-full text-sm px-3 py-2 mb-4 rounded-lg border border-[#e8e8ec]"
+            />
+
+            <div className="flex gap-2">
+              <button
+                onClick={saveVietQr}
+                disabled={vietqrSaving}
+                className="text-xs px-3 py-1.5 rounded-lg bg-[#7c3aed] text-white hover:bg-[#6d28d9] disabled:opacity-40"
+              >
+                {vietqrSaving ? "Đang lưu..." : vietqrSaved ? "Đã lưu ✓" : "Lưu cấu hình"}
+              </button>
+              {vietqr && (
+                <button
+                  onClick={removeVietQr}
+                  disabled={vietqrSaving}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40"
+                >
+                  Xoá cấu hình
+                </button>
+              )}
+            </div>
+
+            <p className="text-[11px] text-[#94a3b8] mt-4">
+              ⚠ STK + tên hiển thị công khai trên QR — tự thân app banking xem được. Đừng dùng STK lương / tiết kiệm chính.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-[#e8e8ec] bg-white p-5">
+            <h3 className="text-base font-semibold mb-1">Preview QR</h3>
+            <p className="text-xs text-[#52525b] mb-4">
+              {vietqr ? "Quét bằng app banking để test." : "Lưu cấu hình bên trái để xem preview."}
+            </p>
+            {vietqr ? (
+              <div className="text-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={`/api/payment/${appId}/vietqr?amount=10000&description=Test%20JV&_v=${vietqrVersion}`}
+                  alt="VietQR preview"
+                  className="mx-auto w-64 h-64 bg-white border border-[#e8e8ec] rounded-xl"
+                />
+                <p className="text-xs text-[#52525b] mt-3">
+                  Test 10.000₫ · &quot;Test JV&quot;
+                </p>
+                <code className="block text-[10px] text-[#94a3b8] mt-4 break-all bg-[#fafafa] p-2 rounded">
+                  jv.payment.vietqr({"{"} amount: 250000, description: &apos;Dat ban&apos; {"}"})
+                </code>
+              </div>
+            ) : (
+              <div className="text-center py-12 text-sm text-[#94a3b8]">Chưa có cấu hình.</div>
+            )}
+          </div>
+        </div>
+        )}
+
         {addOpen && (
           <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setAddOpen(false)}>
             <div className="bg-white rounded-2xl p-5 w-full max-w-lg shadow-2xl" onClick={(e) => e.stopPropagation()}>
@@ -534,3 +698,32 @@ function fmtBytes(n: number): string {
   if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
+
+// Bank options for the payment-config dropdown. Mirrors the top of
+// VN_BANKS in src/lib/vietqr.ts; kept local so this client component
+// doesn't pull a server-only module. Add a new bank in BOTH places.
+const VN_BANKS_OPTIONS = [
+  { bin: "970436", code: "VCB",        name: "Vietcombank" },
+  { bin: "970418", code: "BIDV",       name: "BIDV" },
+  { bin: "970415", code: "VietinBank", name: "VietinBank" },
+  { bin: "970405", code: "Agribank",   name: "Agribank" },
+  { bin: "970422", code: "MB",         name: "MB Bank" },
+  { bin: "970407", code: "Techcombank",name: "Techcombank" },
+  { bin: "970432", code: "VPBank",     name: "VPBank" },
+  { bin: "970423", code: "TPBank",     name: "TPBank" },
+  { bin: "970437", code: "HDBank",     name: "HDBank" },
+  { bin: "970448", code: "OCB",        name: "OCB" },
+  { bin: "970426", code: "MSB",        name: "MSB (Maritime)" },
+  { bin: "970441", code: "VIB",        name: "VIB" },
+  { bin: "970428", code: "NamABank",   name: "Nam A Bank" },
+  { bin: "970424", code: "ShinhanBank",name: "Shinhan Bank" },
+  { bin: "970452", code: "KienlongBank", name: "Kien Long Bank" },
+  { bin: "970440", code: "SeABank",    name: "SeABank" },
+  { bin: "970409", code: "BacABank",   name: "Bac A Bank" },
+  { bin: "970412", code: "PVcomBank",  name: "PVcomBank" },
+  { bin: "970433", code: "VietBank",   name: "VietBank" },
+  { bin: "970431", code: "Eximbank",   name: "Eximbank" },
+  { bin: "970449", code: "LPB",        name: "LPBank" },
+  { bin: "970406", code: "DongABank",  name: "DongA Bank" },
+  { bin: "970429", code: "SCB",        name: "SCB (Saigon)" },
+];

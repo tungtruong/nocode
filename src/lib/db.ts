@@ -126,6 +126,17 @@ function migrate(db: Database.Database) {
       ON user_uploads(user_email, created_at DESC);
     CREATE INDEX IF NOT EXISTS user_uploads_app_idx
       ON user_uploads(app_id, created_at DESC);
+
+    -- Per-app owner-managed settings: VietQR recipient bank, branding,
+    -- future payment provider keys (BYOK) etc. Single row per app_id.
+    -- value_json shape per key documented in src/lib/app-settings.ts.
+    CREATE TABLE IF NOT EXISTS app_settings (
+      app_id     TEXT NOT NULL,
+      key        TEXT NOT NULL,
+      value_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (app_id, key)
+    );
   `);
 
   // ALTER for tables that pre-existed before the `tier` column was introduced.

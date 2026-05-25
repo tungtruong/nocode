@@ -14,9 +14,9 @@
 //   3. Add the name to CAPABILITY_NAMES.
 //   4. Update the classifier's prompt + schema in capability-classifier.ts.
 
-export type CapabilityName = "forms" | "db" | "auth" | "files" | "realtime";
+export type CapabilityName = "forms" | "db" | "auth" | "files" | "realtime" | "payment";
 
-export const CAPABILITY_NAMES: readonly CapabilityName[] = ["forms", "db", "auth", "files", "realtime"] as const;
+export const CAPABILITY_NAMES: readonly CapabilityName[] = ["forms", "db", "auth", "files", "realtime", "payment"] as const;
 
 export interface Capability {
   name: CapabilityName;
@@ -237,12 +237,59 @@ Rules:
   no need to filter them out yourself.`,
 };
 
+const PAYMENT: Capability = {
+  name: "payment",
+  summary: "`payment` — generate VietQR for any VN bank (Vietcombank/MB/Techcombank/...) so users scan + transfer instantly. Zero fees, offline gen.",
+  docs: `## PAYMENT — \`window.jv.payment\` (VietQR — VN instant bank transfer)
+Use when the app needs to ACCEPT money: booking deposit, event ticket,
+product order, donation, tip, wedding gift, course fee.
+
+The owner saves their bank account ONCE in /dashboard/data/<appId> →
+Thanh toán tab. After that, any app that calls jv.payment.vietqr(...)
+renders a QR pointing to that bank — no per-call configuration needed.
+
+API:
+  const qr = jv.payment.vietqr({ amount: 250000, description: 'Dat ban Ba Vi' });
+  // → { url, qrUrl, jsonUrl, info: { bank, accountNo, accountName, amount, description } }
+  // url      → SVG image URL, drop into <img src>
+  // qrUrl    → same as url (alias)
+  // jsonUrl  → JSON endpoint with EMV string + display info (for inspecting)
+
+Render pattern:
+  const div = document.getElementById('checkout');
+  const qr = jv.payment.vietqr({ amount: 250000, description: 'Tip cafe' });
+  div.innerHTML = \`
+    <div style="text-align:center">
+      <img src="\${qr.url}" alt="VietQR" style="width:280px;height:280px">
+      <p>Quét bằng app banking để chuyển <b>250.000đ</b></p>
+      <button onclick="confirmPaid()">Tôi đã chuyển</button>
+    </div>\`;
+
+After confirmation:
+- Use a form action="/f/{{APP_ID}}/submit" so the owner gets a notification of
+  pending payment to reconcile against their bank statement, OR
+- Use jv.db.add('orders', { amount, description, status: 'pending' }) so it
+  shows in /dashboard/data.
+
+Rules:
+- VN-only (uses Napas standard — works with EVERY VN banking app).
+- For per-bank-customer flow (multiple recipients), pass overrides:
+    jv.payment.vietqr({ amount, description, bank: 'TCB', account: '9999', name: 'Pham Trang' })
+- The owner doesn't see the QR in code — bank info loads server-side from
+  their saved config. AI should NEVER hardcode the owner's bank number.
+- No webhook / auto-confirm — owner reconciles manually. For automated
+  confirmation, recommend casso.vn ($20/mo, third-party) but skip in MVP.
+- Amount must be VND integer ≥ 1,000. Description max 25 ASCII chars
+  (server strips Vietnamese diacritics automatically).`,
+};
+
 const REGISTRY: Record<CapabilityName, Capability> = {
   forms: FORMS,
   db: DB,
   auth: AUTH,
   files: FILES,
   realtime: REALTIME,
+  payment: PAYMENT,
 };
 
 export function getCapability(name: CapabilityName): Capability {

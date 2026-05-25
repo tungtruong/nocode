@@ -28,6 +28,7 @@ Available capabilities:
 - auth      — the app needs per-end-user login so each visitor sees only their own data (journal, personal todo, notes, bookmarks, "my orders", member-only content, profile page, personal dashboard)
 - files     — the app needs the OWNER or end-user to UPLOAD files: real product photos, menu food photos, profile avatar, gallery images, PDF resume / brochure, voice notes, course materials, attachment, document
 - realtime  — the app updates LIVE without page refresh: chat, comments, live order ticket / kitchen display, voting / poll counters, multiplayer presence, live event attendee count, collaborative whiteboard, sports score, auction bidding
+- payment   — the app needs to ACCEPT money from visitors via VN bank transfer (VietQR): booking deposit, event ticket sale, product order, donation, tip jar, wedding gift, course fee, paid membership signup, restaurant deposit. Vietnamese market specifically.
 
 Rules:
 - A purely static page (CV with no real avatar, wedding invite, simple landing, pitch deck, calculator, single-page tool that runs in the browser) needs NONE of these — return [].
@@ -35,6 +36,7 @@ Rules:
 - 'auth' implies the app needs at least 'db' for the per-user data — include both if you pick auth.
 - 'files' usually pairs with 'db' (the upload URL needs to be saved somewhere). Include 'db' if you pick 'files' for catalog/menu/listing photos. A CV that needs a real photo upload is the exception — 'files' alone is fine there.
 - 'realtime' implies 'db' (you subscribe to db changes) — include both.
+- 'payment' often pairs with 'forms' (confirmation note) or 'db' (order tracking); include those if the description implies "save the order" or "notify owner".
 - Be CONSERVATIVE. When in doubt, return fewer capabilities. The model can always add later.
 
 Output: STRICT JSON only, one line, no prose, no markdown fence. Must contain the word "json" in your understanding only — output is pure data:
@@ -49,7 +51,7 @@ export interface CapabilityPick {
   raw?: string;
 }
 
-const DEFAULT_ON_ERROR: CapabilityName[] = ["forms", "db", "auth", "files", "realtime"];
+const DEFAULT_ON_ERROR: CapabilityName[] = ["forms", "db", "auth", "files", "realtime", "payment"];
 
 function safeParse(raw: string): CapabilityName[] | null {
   // Trim ```json fences, leading/trailing junk.
