@@ -17,9 +17,22 @@ export async function GET(req: NextRequest) {
 
   if (!googleConfigured()) return fail("oauth_not_configured");
 
+  // Google sends `?error=...&error_description=...` when the user cancels or
+  // grant is refused. Surface that verbatim so the user sees the real reason
+  // instead of a generic "invalid params".
+  const googleError = url.searchParams.get("error");
+  if (googleError) {
+    const desc = url.searchParams.get("error_description") || "";
+    console.error(`[integrations google callback] google_error=${googleError} desc=${desc}`);
+    return fail(`google:${googleError}${desc ? `:${desc.slice(0, 80)}` : ""}`);
+  }
+
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  if (!code || !state) return fail("oauth_invalid_params");
+  if (!code || !state) {
+    console.error(`[integrations google callback] missing code/state — URL: ${req.url}`);
+    return fail("oauth_invalid_params");
+  }
 
   const cookieStore = await cookies();
   const stateRaw = cookieStore.get("justvibe_integration_oauth")?.value;
