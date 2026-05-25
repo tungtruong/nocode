@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { selectRows, supabaseConfigured } from "@/lib/supabase";
 import { ownerOfApp } from "@/lib/app-owner";
 import { checkRateLimit } from "@/lib/security";
+import { getAppSession } from "@/lib/app-auth";
 
 const PRIVATE_TABLES = new Set(["submissions", "_jv_users"]);
 
@@ -67,9 +68,23 @@ export async function POST(
   try { body = await req.json(); } catch { body = {}; }
   const limit = typeof body.limit === "number" && body.limit > 0 ? Math.min(body.limit, 500) : 100;
   const where = body.where && typeof body.where === "object" && !Array.isArray(body.where)
-    ? (body.where as Record<string, string | number | boolean | null>)
+    ? { ...(body.where as Record<string, string | number | boolean | null>) }
     : undefined;
   const orderDesc = body.orderAsc === true ? false : true;
+
+  // `user_id: '@me'` and `uid: '@me'` substitution — lets apps fetch the
+  // logged-in end-user's own rows without ever putting raw user ids in the
+  // client. If unauthenticated, refuse so private data can't leak.
+  if (where) {
+    const meKeys = Object.entries(where).filter(([, v]) => v === "@me").map(([k]) => k);
+    if (meKeys.length > 0) {
+      const session = await getAppSession(appId);
+      if (!session) {
+        return withCors(NextResponse.json({ error: "Cần đăng nhập" }, { status: 401 }));
+      }
+      for (const k of meKeys) where[k] = session.uid;
+    }
+  }
 
   try {
     const rows = await selectRows(appId, table, { limit, where, orderDesc });

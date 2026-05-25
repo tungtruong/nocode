@@ -22,33 +22,72 @@ export const JV_RUNTIME_VERSION = "1";
 
 // The runtime is intentionally ES5-ish + no build step — it has to run
 // inside the sandboxed iframe verbatim with no transpiler in the way.
+//
+// Surface:
+//   jv.appId                                     // string
+//   jv.db.list(table, {where, limit, orderAsc})  // [{...row, _id, _createdAt}, ...]
+//   jv.db.find(table, where)                     // single row or null
+//   jv.db.count(table, where?)                   // number
+//   jv.db.add(table, row)                        // {id, created_at} (auth required)
+//   jv.db.update(table, rowId, fields)           // {ok, updated_at} (own row only)
+//   jv.db.remove(table, rowId)                   // {ok}              (own row only)
+//   jv.auth.user()                               // {uid, email, name, picture} or null
+//   jv.auth.signIn(returnUrl?)                   // top-nav redirect to Google
+//   jv.auth.signOut()                            // clears cookie, reload optional
+//
+// All write/auth calls send credentials so the per-app session cookie
+// (`__jv_au_<appId>` on .justvibe.me) reaches the API origin cross-subdomain.
 const RUNTIME_BODY = `(function(){
   if (window.jv) return;
   var APP_ID = window.__JV_APP_ID__ || "";
   var API = window.__JV_API_BASE__ || "https://justvibe.me";
-  function rpc(table, body){
-    return fetch(API + "/api/db/" + encodeURIComponent(APP_ID) + "/" + encodeURIComponent(table) + "/list", {
+  function jpost(path, body){
+    return fetch(API + path, {
       method: "POST",
+      credentials: "include",
       headers: {"content-type":"application/json"},
       body: JSON.stringify(body || {})
     }).then(function(r){
-      if (!r.ok) return r.json().catch(function(){return {error:"HTTP "+r.status};}).then(function(e){throw new Error(e.error || ("HTTP "+r.status));});
-      return r.json();
-    }).then(function(r){
-      return (r.rows||[]).map(function(row){
-        var d = row.row_data || {};
-        d._id = row.id;
-        d._createdAt = row.created_at;
-        return d;
+      return r.json().catch(function(){return {};}).then(function(j){
+        if (!r.ok) throw new Error(j.error || ("HTTP "+r.status));
+        return j;
       });
+    });
+  }
+  function jget(path){
+    return fetch(API + path, {credentials:"include"}).then(function(r){
+      return r.json().catch(function(){return {};}).then(function(j){
+        if (!r.ok) throw new Error(j.error || ("HTTP "+r.status));
+        return j;
+      });
+    });
+  }
+  function mapRows(r){
+    return (r.rows||[]).map(function(row){
+      var d = row.row_data || {};
+      d._id = row.id;
+      d._createdAt = row.created_at;
+      return d;
     });
   }
   window.jv = {
     appId: APP_ID,
     db: {
-      list: function(table, opts){ return rpc(table, opts || {}); },
-      find: function(table, where){ return rpc(table, {where: where, limit: 1}).then(function(a){ return a[0] || null; }); },
-      count: function(table, where){ return rpc(table, {where: where, limit: 1000}).then(function(a){ return a.length; }); }
+      list: function(table, opts){ return jpost("/api/db/"+encodeURIComponent(APP_ID)+"/"+encodeURIComponent(table)+"/list", opts||{}).then(mapRows); },
+      find: function(table, where){ return jpost("/api/db/"+encodeURIComponent(APP_ID)+"/"+encodeURIComponent(table)+"/list", {where:where,limit:1}).then(mapRows).then(function(a){return a[0]||null;}); },
+      count: function(table, where){ return jpost("/api/db/"+encodeURIComponent(APP_ID)+"/"+encodeURIComponent(table)+"/list", {where:where,limit:1000}).then(mapRows).then(function(a){return a.length;}); },
+      add: function(table, row){ return jpost("/api/db/"+encodeURIComponent(APP_ID)+"/"+encodeURIComponent(table)+"/add", {row:row}); },
+      update: function(table, rowId, fields){ return jpost("/api/db/"+encodeURIComponent(APP_ID)+"/"+encodeURIComponent(table)+"/own-update", {rowId:rowId,fields:fields}); },
+      remove: function(table, rowId){ return jpost("/api/db/"+encodeURIComponent(APP_ID)+"/"+encodeURIComponent(table)+"/own-delete", {rowId:rowId}); }
+    },
+    auth: {
+      user: function(){ return jget("/api/auth/app/me?app="+encodeURIComponent(APP_ID)).then(function(r){return r.user;}); },
+      signIn: function(returnUrl){
+        var ret = returnUrl || location.href;
+        var url = API + "/api/auth/app/start?app=" + encodeURIComponent(APP_ID) + "&redirect=" + encodeURIComponent(ret);
+        if (window.top) window.top.location.href = url; else location.href = url;
+      },
+      signOut: function(){ return jpost("/api/auth/app/signout?app="+encodeURIComponent(APP_ID), {}); }
     }
   };
 })();`;

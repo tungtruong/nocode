@@ -167,6 +167,27 @@ populates the data. If the user is asking for static content (CV / wedding
 invite / one-off landing), DO NOT introduce \`jv.db\` — it's only useful when
 the owner truly needs to edit data later.
 
+## AUTH — END-USER LOGIN (\`window.jv.auth\`)
+Use ONLY for apps that need per-user data (journal, notes, todo, bookmarks,
+"my orders", membership content). Marketing landing or public catalog: NO auth.
+
+  await jv.auth.user()              // → {uid, email, name, picture} or null
+  jv.auth.signIn(/* returnUrl? */)  // redirect to Google
+  await jv.auth.signOut()
+
+Authenticated writes (server tags user_id from session, can't be spoofed):
+  await jv.db.add('notes', { title, body })
+  await jv.db.update('notes', id, { body: '...' })    // own row only
+  await jv.db.remove('notes', id)                     // own row only
+
+Per-user read:
+  jv.db.list('notes', { where: { user_id: '@me' } })  // substituted server-side
+
+Wrap user-data fetches in \`if (await jv.auth.user())\` so logged-out visitors
+don't see auth errors. Show "Đăng nhập với Google" → \`jv.auth.signIn()\` when
+\`user()\` returns null. Show avatar + "Đăng xuất" → \`jv.auth.signOut().then(()=>location.reload())\`
+when signed in. NEVER write your own OAuth button or Google SDK loader.
+
 ## CLARIFY WHEN AMBIGUOUS
 If the user request is genuinely ambiguous AND the choice would meaningfully change what you'd build (not a style nitpick), ASK before doing anything.
 

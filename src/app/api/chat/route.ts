@@ -127,6 +127,34 @@ Rules:
     });
 - Skip \`jv.db\` entirely for static pages (CV, wedding invite, landing) — only use it when content really needs to be dynamic.
 
+## AUTH — END-USER LOGIN (\`window.jv.auth\` + per-user \`jv.db\`)
+The runtime also ships an end-user auth system (Google OAuth). Use it ONLY when
+the app needs per-user data (journal / notes / personal todo / bookmarks /
+"my orders" / membership content). DO NOT add auth to a marketing landing
+or a catalog browse view — those don't need login.
+
+API:
+  await jv.auth.user()              // → { uid, email, name, picture } or null
+  jv.auth.signIn(/* returnUrl? */)  // top-nav redirect to Google + back
+  await jv.auth.signOut()           // clear cookie, then reload page
+
+Authenticated writes (current user becomes the row's owner):
+  await jv.db.add('notes', { title: '...', body: '...' })       // tag user_id auto
+  await jv.db.update('notes', noteId, { body: '...new...' })    // own row only
+  await jv.db.remove('notes', noteId)                           // own row only
+
+Per-user read (server substitutes the current uid):
+  const mine = await jv.db.list('notes', { where: { user_id: '@me' } })
+
+Patterns:
+- On page load, call \`jv.auth.user()\` first. If \`null\` → show "Đăng nhập với
+  Google" button calling \`jv.auth.signIn()\`. If user → show profile chip with
+  avatar + name + "Đăng xuất" button calling \`jv.auth.signOut().then(() => location.reload())\`.
+- Wrap user-data fetches in \`if (await jv.auth.user()) { ... }\` so a logged-out
+  visitor doesn't see "Cần đăng nhập" errors in their console.
+- The injected runtime handles cookies + redirects. Do NOT add your own OAuth
+  buttons, Google SDK loads, or login forms.
+
 ## DO NOT
 - Do not include analytics, tracking, external CDN scripts unless explicitly requested.
 - Do not add features (auth, settings, theme toggle, export) unless the user asks.
