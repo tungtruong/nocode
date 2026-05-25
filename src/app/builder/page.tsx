@@ -255,6 +255,10 @@ export default function BuilderPage() {
   // would open a stale page, so we re-deploy first.
   const [deployedHtml, setDeployedHtml] = useState("");
 
+  // Toast shown right after deploy when the app has a form and the owner
+  // hasn't bound a sheet for it yet — the natural moment to ask.
+  const [formNudge, setFormNudge] = useState<{ appId: string } | null>(null);
+
   const deploy = useCallback(async (h: string): Promise<string | null> => {
     setDeploying(true);
     setError("");
@@ -268,6 +272,12 @@ export default function BuilderPage() {
       if (!r.ok) throw new Error(d.error || "Deploy thất bại");
       setUrl(d.url);
       setDeployedHtml(h);
+      // Detect whether the just-deployed HTML has a form pointed at our
+      // submit endpoint. If so, prompt the user to bind a sheet — otherwise
+      // submissions silently fall into JV's transient table.
+      if (/\/f\/[a-z0-9-]+\/submit/i.test(h) && appId) {
+        setFormNudge({ appId });
+      }
       return d.url as string;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Lỗi deploy");
@@ -635,6 +645,13 @@ export default function BuilderPage() {
             <span className="text-base font-bold tracking-tight text-[#0f172a]">JustVibe</span>
           </Link>
           <div className="flex items-center gap-2">
+            <Link
+              href="/dashboard/integrations"
+              title="Kết nối Google Sheets để form lưu data"
+              className="hidden sm:inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs text-[#52525b] hover:text-[#18181b] hover:bg-[#f1f5f9] transition-all"
+            >
+              🔌 Kết nối
+            </Link>
             <UsageBadge refreshKey={usageNonce} />
             <LangToggle />
             <button onClick={handleLogout} className="rounded-lg px-2.5 py-1.5 text-xs text-[#64748b] hover:text-[#64748b] hover:bg-[#f1f5f9] transition-all">{t.signout}</button>
@@ -1057,6 +1074,40 @@ export default function BuilderPage() {
           onConfirm={() => { setQuotaExceeded(null); router.push("/pricing"); }}
           onCancel={() => setQuotaExceeded(null)}
         />
+      )}
+
+      {formNudge && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-sm rounded-2xl border border-[#7c3aed]/30 bg-white p-4 shadow-2xl shadow-[#7c3aed]/20 animate-in fade-in slide-in-from-bottom-2">
+          <div className="flex items-start gap-3">
+            <div className="text-xl shrink-0">📋</div>
+            <div className="flex-1 min-w-0">
+              <h4 className="font-semibold text-sm text-[#18181b] mb-1">App có form — bind sheet để nhận data</h4>
+              <p className="text-xs text-[#52525b] leading-relaxed mb-3">
+                Form submission sẽ lưu vào Google Sheet trong Drive của bạn. Bind ngay để không miss lead nào.
+              </p>
+              <div className="flex gap-2">
+                <Link
+                  href={`/dashboard/forms/${formNudge.appId}`}
+                  className="text-xs rounded-lg bg-[#7c3aed] text-white px-3 py-1.5 hover:bg-[#6d28d9]"
+                  onClick={() => setFormNudge(null)}
+                >
+                  Bind sheet →
+                </Link>
+                <button
+                  onClick={() => setFormNudge(null)}
+                  className="text-xs rounded-lg text-[#94a3b8] hover:text-[#52525b] px-2 py-1.5"
+                >
+                  Để sau
+                </button>
+              </div>
+            </div>
+            <button
+              onClick={() => setFormNudge(null)}
+              className="text-[#94a3b8] hover:text-[#52525b] text-base leading-none shrink-0"
+              aria-label="Close"
+            >×</button>
+          </div>
+        </div>
       )}
 
       {showModeModal && (
