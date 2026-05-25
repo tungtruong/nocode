@@ -7,6 +7,8 @@ import { LangToggle, useLang } from "@/components/LangProvider";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { UsageBadge } from "@/components/UsageBadge";
 import { APP_MODES, DEFAULT_MODE, type ModeId } from "@/lib/modes";
+import { VISUAL_EDIT_BRIDGE_SCRIPT } from "@/lib/visual-edit-bridge";
+import { VisualEditInspector, type SelectedElement, type EditProp } from "@/components/VisualEditInspector";
 
 function cleanHtml(raw: string): string {
   let cleaned = raw;
@@ -152,6 +154,16 @@ export default function BuilderPage() {
   const [showModeModal, setShowModeModal] = useState(false);
   const [showFlagModal, setShowFlagModal] = useState(false);
   const [flagSent, setFlagSent] = useState(false);
+  // "build" → /api/chat or /api/edit (writes to HTML). "ask" → /api/ask
+  // (read-only Q&A, no HTML change). Lovable-style mode separator so users
+  // can debug/inspect without burning an edit turn.
+  const [chatMode, setChatMode] = useState<"build" | "ask">("build");
+  // Visual Edit mode: when on, the preview iframe runs the bridge script,
+  // hovered elements get a purple outline, clicks open the inspector panel,
+  // and edits apply live via postMessage (no LLM call).
+  const [visualEdit, setVisualEdit] = useState(false);
+  const [visualSelected, setVisualSelected] = useState<SelectedElement | null>(null);
+  const [visualSaving, setVisualSaving] = useState(false);
   const [newAppName, setNewAppName] = useState("");
   const [savedProjects, setSavedProjects] = useState<SavedProject[]>([]);
   const [input, setInput] = useState("");
@@ -348,6 +360,10 @@ export default function BuilderPage() {
 
     try {
       const isFirst = !html;
+      // Ask mode only makes sense once an app exists — the question is
+      // about THAT app. Force-fallback to Build mode if there's no html yet.
+      const askMode = chatMode === "ask" && !isFirst;
+
       // Auto-detect mode from the user's first message before /api/chat. Falls
       // back gracefully if /api/intent errors — we just keep the default mode.
       let effectiveMode = mode;
@@ -370,8 +386,10 @@ export default function BuilderPage() {
         } catch { /* classifier best-effort — proceed with default */ }
       }
 
-      const ep = isFirst ? "/api/chat" : "/api/edit";
-      const bd = isFirst
+      const ep = askMode ? "/api/ask" : (isFirst ? "/api/chat" : "/api/edit");
+      const bd = askMode
+        ? JSON.stringify({ currentHtml: html, newMessage: text, projectId: appId, mode: effectiveMode })
+        : isFirst
         ? JSON.stringify({ messages: all.slice(0, -1), currentHtml: html, newMessage: text, projectId: appId, mode: effectiveMode })
         : JSON.stringify({
             currentHtml: html,
@@ -468,18 +486,28 @@ export default function BuilderPage() {
         chunk = parts.join("");
         if (!chunk.trim()) continue;
         acc += chunk;
-        const c2 = cleanHtml(acc);
-        setHtml(c2);
-        updatePreview(c2);
-        setMsgs((p) => p.map((m) => (m.id === aid ? { ...m, text: c2, html: c2 } : m)));
+        if (askMode) {
+          // Ask mode: chunks are plain text answers. Render directly into
+          // the assistant bubble — no preview update, no HTML state change.
+          setMsgs((p) => p.map((m) => (m.id === aid ? { ...m, text: acc, summary: acc } : m)));
+        } else {
+          const c2 = cleanHtml(acc);
+          setHtml(c2);
+          updatePreview(c2);
+          setMsgs((p) => p.map((m) => (m.id === aid ? { ...m, text: c2, html: c2 } : m)));
+        }
         if (phase === "thinking") setPhase("streaming");
       }
       acc += dec.decode();
-      const fin = cleanHtml(acc);
-      updatePreview(fin, true);
-      setHtml(fin);
-      setActive(si as 0 | 1);
-      setMsgs((p) => p.map((m) => (m.id === aid ? { ...m, text: fin, html: fin } : m)));
+      if (askMode) {
+        setMsgs((p) => p.map((m) => (m.id === aid ? { ...m, text: acc.trim(), summary: acc.trim() } : m)));
+      } else {
+        const fin = cleanHtml(acc);
+        updatePreview(fin, true);
+        setHtml(fin);
+        setActive(si as 0 | 1);
+        setMsgs((p) => p.map((m) => (m.id === aid ? { ...m, text: fin, html: fin } : m)));
+      }
       setPhase("done");
     } catch (e) {
       if (e instanceof Error && e.name !== "AbortError") {
@@ -492,11 +520,70 @@ export default function BuilderPage() {
       // Re-pull usage now that the round-trip has completed (success or fail).
       setUsageNonce((n) => n + 1);
     }
-  }, [input, msgs, html, phase, t, pendingClarifyKey, mode, appId]);
+  }, [input, msgs, html, phase, t, pendingClarifyKey, mode, appId, chatMode]);
 
   // Memoize the animated version so reopening a project or toggling
   // between iframes doesn't re-inject every render.
-  const animatedHtml = useMemo(() => (html ? injectPreviewAnim(html) : ""), [html]);
+  // Re-key the iframe srcdoc when visualEdit toggles so the bridge script
+  // gets injected/removed cleanly. injectIntoHead is safe to call after
+  // injectPreviewAnim — it just prepends another snippet under <head>.
+  const animatedHtml = useMemo(() => {
+    if (!html) return "";
+    const base = injectPreviewAnim(html);
+    return visualEdit ? injectIntoHead(base, VISUAL_EDIT_BRIDGE_SCRIPT) : base;
+  }, [html, visualEdit]);
+
+  // Listen for messages from the preview iframes (visual-edit bridge).
+  useEffect(() => {
+    function onMsg(ev: MessageEvent) {
+      const d = ev.data as { source?: string; type?: string; path?: number[]; info?: SelectedElement["info"]; html?: string };
+      if (!d || d.source !== "jv-edit") return;
+      if (d.type === "select" && d.path && d.info) {
+        setVisualSelected({ path: d.path, info: d.info });
+      } else if (d.type === "snapshot" && typeof d.html === "string") {
+        setHtml(d.html);
+        setVisualEdit(false);
+        setVisualSelected(null);
+        setVisualSaving(false);
+      } else if (d.type === "ready") {
+        // Send enable on (re)load if we're currently in edit mode.
+        if (visualEdit) {
+          [frameA.current, frameB.current].forEach((f) => {
+            f?.contentWindow?.postMessage({ source: "jv-edit", type: "enable" }, "*");
+          });
+        }
+      }
+    }
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, [visualEdit]);
+
+  // Push enable/disable to the currently-active iframe when the toggle flips.
+  // queueMicrotask defers the cleanup setState past the effect body.
+  useEffect(() => {
+    [frameA.current, frameB.current].forEach((f) => {
+      f?.contentWindow?.postMessage({ source: "jv-edit", type: visualEdit ? "enable" : "disable" }, "*");
+    });
+    if (!visualEdit) queueMicrotask(() => setVisualSelected(null));
+  }, [visualEdit]);
+
+  // Live-apply a property edit from the inspector → bridge.
+  const applyVisualEdit = useCallback((prop: EditProp, value: string) => {
+    if (!visualSelected) return;
+    [frameA.current, frameB.current].forEach((f) => {
+      f?.contentWindow?.postMessage({
+        source: "jv-edit", type: "apply", path: visualSelected.path, prop, value,
+      }, "*");
+    });
+  }, [visualSelected]);
+
+  // Ask the bridge to snapshot the current DOM and post it back. The message
+  // listener above writes the new HTML into state + exits edit mode.
+  const saveVisualEdits = useCallback(() => {
+    setVisualSaving(true);
+    const target = activeRef.current === 0 ? frameA.current : frameB.current;
+    target?.contentWindow?.postMessage({ source: "jv-edit", type: "snapshot" }, "*");
+  }, []);
 
   // Manual reload: blank both iframes then re-set srcdoc so the user's in-memory
   // state (counters, form input, theme toggle) starts from scratch — useful
@@ -970,12 +1057,47 @@ export default function BuilderPage() {
             {error && (
               <div className="mb-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">{error}</div>
             )}
+            {/* Mode toggle — only meaningful once an app exists. "Hỏi" sends
+                to /api/ask (read-only, no edit), "Sửa" sends to /api/edit
+                (the usual flow). Lovable's Chat-vs-Build pattern. */}
+            {html && (
+              <div className="mb-2 inline-flex rounded-full bg-[#f1f5f9] p-0.5 text-[11px] font-medium">
+                <button
+                  type="button"
+                  onClick={() => setChatMode("build")}
+                  className={`px-3 py-1 rounded-full transition-all ${
+                    chatMode === "build"
+                      ? "bg-white text-[#7c3aed] shadow-sm"
+                      : "text-[#64748b] hover:text-[#334155]"
+                  }`}
+                  title="Mô tả thay đổi, AI sẽ sửa app"
+                >
+                  ⚒ Sửa
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChatMode("ask")}
+                  className={`px-3 py-1 rounded-full transition-all ${
+                    chatMode === "ask"
+                      ? "bg-white text-[#7c3aed] shadow-sm"
+                      : "text-[#64748b] hover:text-[#334155]"
+                  }`}
+                  title="Hỏi AI về app (không sửa code)"
+                >
+                  💬 Hỏi
+                </button>
+              </div>
+            )}
             <div className="flex items-center gap-2 bg-[#f8fafc] rounded-2xl border border-[#e2e8f0] focus-within:border-[#7c3aed]/40 focus-within:ring-2 focus-within:ring-[#7c3aed]/10 focus-within:bg-white transition-all px-3 sm:px-4 py-2">
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-                placeholder={html ? t.buildPlaceholderEdit : t.buildPlaceholderFirst}
+                placeholder={
+                  chatMode === "ask" && html
+                    ? "Hỏi gì về app này? (vd: nút thanh toán nằm ở đâu?)"
+                    : html ? t.buildPlaceholderEdit : t.buildPlaceholderFirst
+                }
                 rows={2}
                 disabled={busy}
                 className="flex-1 resize-none bg-transparent text-sm leading-relaxed text-[#0f172a] placeholder:text-[#cbd5e1] focus:outline-none disabled:opacity-40 py-0.5"
@@ -1002,21 +1124,35 @@ export default function BuilderPage() {
               <span className="text-xs font-semibold text-[#64748b] uppercase tracking-wider">{t.buildPreview}</span>
             </div>
             {html && !busy && (
-              <button
-                onClick={refreshPreview}
-                aria-label={t.buildRefreshPreview}
-                title={t.buildRefreshPreview}
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#7c3aed] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7c3aed]/30 transition-colors"
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
-                  <path d="M13.5 2v3h-3" />
-                </svg>
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setVisualEdit((v) => !v)}
+                  aria-label="Visual edit"
+                  title={visualEdit ? "Thoát Visual Edit" : "Visual Edit — click element để sửa text/màu/size không tốn quota"}
+                  className={`flex h-7 px-2 items-center justify-center rounded-lg text-xs gap-1 transition-colors ${
+                    visualEdit
+                      ? "bg-[#7c3aed] text-white"
+                      : "text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#7c3aed]"
+                  }`}
+                >
+                  🎨 <span className="hidden sm:inline">{visualEdit ? "Thoát" : "Visual"}</span>
+                </button>
+                <button
+                  onClick={refreshPreview}
+                  aria-label={t.buildRefreshPreview}
+                  title={t.buildRefreshPreview}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#7c3aed] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7c3aed]/30 transition-colors"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
+                    <path d="M13.5 2v3h-3" />
+                  </svg>
+                </button>
+              </div>
             )}
           </div>
           <div className="relative flex-1 bg-white">
-            <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-8">
+            <div className={`absolute inset-0 flex items-center justify-center p-4 sm:p-8 ${visualEdit ? "sm:pr-80" : ""}`}>
               <div className="h-full w-full sm:max-w-[420px] sm:h-auto sm:aspect-[9/16] sm:max-h-[85vh] rounded-3xl sm:shadow-2xl sm:shadow-black/[0.06] sm:ring-1 sm:ring-black/[0.04] overflow-hidden">
                 <iframe ref={frameA} title="A" className="absolute inset-0 w-full h-full border-0 transition-opacity duration-100"
                   style={{ opacity: active === 0 ? 1 : 0, pointerEvents: active === 0 ? "auto" : "none", zIndex: active === 0 ? 2 : 1 }}
@@ -1026,6 +1162,15 @@ export default function BuilderPage() {
                   sandbox="allow-scripts allow-modals allow-forms" referrerPolicy="no-referrer" />
               </div>
             </div>
+            {visualEdit && (
+              <VisualEditInspector
+                selected={visualSelected}
+                onApply={applyVisualEdit}
+                onClose={() => setVisualEdit(false)}
+                onSave={saveVisualEdits}
+                saving={visualSaving}
+              />
+            )}
             {!html && !busy && (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-[#cbd5e1] z-0">
                 <p className="text-base font-semibold text-[#64748b]">{t.buildPreviewEmpty}</p>

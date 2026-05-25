@@ -104,6 +104,15 @@ export function getToolDefinitions() {
   return TOOL_DEFINITIONS;
 }
 
+// Read-only subset for "Ask" mode — the agent can inspect the VFS to answer
+// the user's question but can't write/edit. Used by /api/ask so questions
+// like "tại sao nút không bấm được?" don't accidentally mutate files.
+export function getReadOnlyToolDefinitions() {
+  return TOOL_DEFINITIONS.filter(
+    (t) => t.function.name === "read_file" || t.function.name === "grep",
+  );
+}
+
 export function executeTool(
   files: Record<string, string>,
   toolName: string,
