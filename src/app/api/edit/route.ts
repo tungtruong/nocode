@@ -8,6 +8,7 @@ import {
   type VirtualFiles,
 } from "@/lib/vfs";
 import { getToolDefinitions, executeTool } from "@/lib/tools";
+import { createJob, finishJob, finishJobError } from "@/lib/gen-jobs";
 import { allSummaries as capabilitySummaries } from "@/lib/jv-capabilities";
 import { detectPromptViolation, scanGeneratedHtml, checkRateLimit } from "@/lib/security";
 import { requireSession, authError, type Session } from "@/lib/auth";
@@ -343,8 +344,20 @@ export async function POST(req: NextRequest) {
           try { controller.close(); } catch { /* already closed */ }
         };
         const sendProgress = (msg: string) => safeEnqueue(encoder.encode(`\x1E${msg}\n`));
+
+        // Pre-create gen_jobs row so the client can reconnect via
+        // /api/chat/resume/<jobId> if its fetch dies mid-edit (mobile tab
+        // backgrounded, network drop). Final HTML lands in the row at the
+        // end regardless of client connection state.
+        const jobId = createJob(session.email, projId);
+        sendProgress(`job ${jobId}`);
+
+        // IMPORTANT: don't flip `closed` on client abort — that used to
+        // tear down the agent loop, which meant a backgrounded mobile
+        // client lost the entire edit. Keep the agent loop running; only
+        // the keepalive interval gets cleared since there's no client to
+        // keep alive anymore.
         req.signal.addEventListener("abort", () => {
-          closed = true;
           if (keepalive) { clearInterval(keepalive); keepalive = null; }
         });
 
@@ -436,9 +449,9 @@ export async function POST(req: NextRequest) {
                 msg.content
               )
             ) {
-              safeEnqueue(encoder.encode(
-                "<html><body><h1>Error</h1><p>Response blocked by safety filter.</p></body></html>"
-              ));
+              const blocked = "<html><body><h1>Error</h1><p>Response blocked by safety filter.</p></body></html>";
+              safeEnqueue(encoder.encode(blocked));
+              try { finishJob(jobId, blocked, "Blocked by safety filter"); } catch {}
               safeClose();
               return;
             }
@@ -524,10 +537,14 @@ export async function POST(req: NextRequest) {
               `clarify ${encodeURIComponent(JSON.stringify({ key, question: clarify.question, options: clarify.options }))}`
             );
             sendProgress(`done ${toolCalls} tools ${billedClarify} tokens (clarify)`);
+            // Resume case: persist the (unchanged) original HTML + the
+            // clarify question so a reconnecting client doesn't lose the
+            // question text. Note: clarify lives in resumed token cache too,
+            // so this is mainly for showing the preview.
+            try { finishJob(jobId, currentHtml, clarify.question); } catch {}
             // Stream the original HTML back so the preview doesn't go blank.
             const echoBytes = encoder.encode(currentHtml);
             for (let i = 0; i < echoBytes.length; i += 2048) {
-              if (closed) return;
               safeEnqueue(echoBytes.slice(i, i + 2048));
             }
             safeClose();
@@ -644,21 +661,28 @@ export async function POST(req: NextRequest) {
 
           const outputViolation = scanGeneratedHtml(mergedHtml);
           if (outputViolation) {
-            safeEnqueue(encoder.encode(
-              "<html><body><h1>Blocked</h1><p>Safety filter: " +
-                outputViolation.reason +
-                "</p></body></html>"
-            ));
+            const blockedHtml = "<html><body><h1>Blocked</h1><p>Safety filter: " +
+              outputViolation.reason +
+              "</p></body></html>";
+            safeEnqueue(encoder.encode(blockedHtml));
+            try { finishJob(jobId, blockedHtml, `Blocked: ${outputViolation.reason}`); } catch {}
             safeClose();
             return;
           }
 
           sendProgress(`done ${toolCalls} tools ${billed} tokens`);
 
+          // Persist BEFORE streaming chunks so a resuming client gets the
+          // full result even if it reconnects between the first and last
+          // chunk write.
+          try { finishJob(jobId, mergedHtml, summary); } catch { /* persist failure not fatal */ }
+
           const htmlBytes = encoder.encode(mergedHtml);
           const chunkSize = 2048;
           for (let i = 0; i < htmlBytes.length; i += chunkSize) {
-            if (closed) return;
+            // Don't break on `closed` — keep filling the response stream
+            // for any still-connected client, but the persist above already
+            // covered the resume-after-disconnect case.
             safeEnqueue(htmlBytes.slice(i, i + chunkSize));
           }
           safeClose();
@@ -683,10 +707,12 @@ export async function POST(req: NextRequest) {
         // rate limit + maxTurns + tokenBudget that already fired.
         console.log(`[EDIT] refunded in=${totalPromptTokens} (cached=${totalCachedTokens}) out=${totalCompletionTokens} weighted=${billedFallback} (capHit=${hitTokenCap}, turns=${turn}/${maxTurns})`);
 
+        // Fallback: return original HTML unchanged (no edit happened).
+        try { finishJob(jobId, currentHtml, reason); } catch { /* persist failure not fatal */ }
+
         const fallbackBytes = encoder.encode(currentHtml);
         const fallbackChunkSize = 2048;
         for (let i = 0; i < fallbackBytes.length; i += fallbackChunkSize) {
-          if (closed) return;
           safeEnqueue(fallbackBytes.slice(i, i + fallbackChunkSize));
         }
         safeClose();
@@ -697,6 +723,7 @@ export async function POST(req: NextRequest) {
             ? "AI phản hồi quá chậm. Thử lại sau ít phút."
             : "Lỗi chỉnh sửa. Thử lại nhé.";
           sendProgress(`error ${encodeURIComponent(userMsg)}`);
+          try { finishJobError(jobId, userMsg); } catch { /* persist failure not fatal */ }
           safeClose();
         }
       },

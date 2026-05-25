@@ -1128,13 +1128,9 @@ export default function BuilderPage() {
                     ) : (
                       <div>
                         <p className="text-xs text-[#334155] leading-relaxed whitespace-pre-line">{summary}</p>
-                        {isLast && !busy && lastPlan && lastPlan.suggestions.length > 0 && (
-                          <PlanSuggestions
-                            plan={lastPlan}
-                            onAccept={(sug) => send(`Thêm tính năng ${sug.cap}: ${sug.reason}`)}
-                            onDismiss={() => setLastPlan({ ...lastPlan, suggestions: [] })}
-                          />
-                        )}
+                        {/* Suggestion chips removed per user feedback —
+                            orchestrator still picks caps it needs, just
+                            doesn't ask the user about optional add-ons. */}
                         {m.clarify && !busy && (
                           <div className="mt-2 flex flex-wrap gap-1.5">
                             {m.clarify.options.map((opt) => (
@@ -1717,34 +1713,8 @@ function PlanBanner({ plan }: {
   );
 }
 
-function PlanSuggestions({
-  plan,
-  onAccept,
-  onDismiss,
-}: {
-  plan: { suggestions: Array<{ cap: string; reason: string }> };
-  onAccept: (sug: { cap: string; reason: string }) => void;
-  onDismiss: () => void;
-}) {
-  if (plan.suggestions.length === 0) return null;
-  return (
-    <div className="mt-3 rounded-lg border border-[#e9d5ff] bg-[#faf5ff] px-2.5 py-2">
-      <div className="flex items-center justify-between mb-1.5">
-        <span className="text-[11px] font-semibold text-[#5b21b6]">💡 Gợi ý nâng cấp</span>
-        <button onClick={onDismiss} className="text-[10px] text-[#a1a1aa] hover:text-[#71717a]">Bỏ qua</button>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        {plan.suggestions.map((s, i) => (
-          <button
-            key={i}
-            onClick={() => onAccept(s)}
-            className="text-left text-[11px] leading-snug rounded-md border border-[#e9d5ff] bg-white hover:bg-[#f5f3ff] px-2 py-1.5"
-          >
-            <span className="font-medium text-[#5b21b6]">+ {CAP_LABEL[s.cap] || s.cap}</span>
-            <span className="text-[#52525b]"> · {s.reason}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
+// PlanSuggestions component removed — orchestrator no longer surfaces
+// optional add-ons via UI chips. The capability registry still tracks them
+// for analytics but the user-visible "💡 Gợi ý nâng cấp" prompt was off-
+// context too often (e.g. proposing a kitchen-display capability for a
+// bicycle shop). User wants the gen to just include what's needed.

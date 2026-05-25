@@ -54,7 +54,8 @@ const SUPPORTED_MODES = Object.keys(APP_MODES) as ModeId[];
 const PLANNER_PROMPT = `You are an app-planning orchestrator. Given a user's request for a web app (in Vietnamese, English, or any mix), decide:
 1. Which app MODE it is.
 2. Which CAPABILITIES the app needs from the runtime.
-3. Up to 2 optional SUGGESTIONS — capabilities the user didn't ask for but would clearly enhance their app.
+
+Do NOT propose optional add-ons or upgrades. The user wants the app they asked for, not features to consider. Just pick what's needed.
 
 MODES:
 - web_app — generic single-purpose app (todo, calculator, tracker, tool) — fallback for anything not in the list
@@ -77,11 +78,9 @@ RULES:
 - 'auth' implies 'db'. 'realtime' implies 'db'. Include both when picking one.
 - 'files' usually implies 'db' (need to save the URL) — except a CV with just an avatar.
 - Be CONSERVATIVE with primary caps — only include what the user clearly asked for or implied.
-- SUGGESTIONS are different — proactively recommend up to 2 capabilities the user did NOT mention but that would obviously enhance their app. Give a short Vietnamese reason for each.
-- If the user already asked for everything they need, suggestions = [].
 
 Output STRICT JSON only (the word "json" is required to enable structured output):
-{"mode":"qr_menu","caps":["forms","db","payment"],"suggestions":[{"cap":"realtime","reason":"Bếp thấy đơn mới ngay khi khách order"}]}`;
+{"mode":"qr_menu","caps":["forms","db","payment"]}`;
 
 const ALL_CAPS_DEFAULT: CapabilityName[] = [...CAPABILITY_NAMES];
 
