@@ -7,7 +7,7 @@ import type { Stream } from "openai/streaming";
 // When DeepSeek times out or errors, we transparently retry on OpenAI.
 //
 // Models:
-//   DEEPSEEK_MODEL  default deepseek-chat
+//   DEEPSEEK_MODEL  default deepseek-v4-pro (user standard — set in .env)
 //   OPENAI_MODEL    default gpt-4o-mini (cheap, supports tool use)
 
 export interface AiProvider {
@@ -34,7 +34,7 @@ export function getPrimary(): AiProvider | null {
       timeout: 60_000,
       maxRetries: 0,
     }),
-    model: process.env.DEEPSEEK_MODEL || "deepseek-chat",
+    model: process.env.DEEPSEEK_MODEL || "deepseek-v4-pro",
   };
   return _primary;
 }
