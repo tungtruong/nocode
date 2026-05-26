@@ -132,7 +132,9 @@ export async function GET(
 
   const buf = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
 
-  return new NextResponse(buf, {
+  // Wrap in Blob for NextResponse — newer @types/node has Uint8Array<ArrayBufferLike>
+  // which doesn't satisfy BodyInit in this TS version; Blob always does.
+  return new NextResponse(new Blob([new Uint8Array(buf)], { type: "application/zip" }), {
     status: 200,
     headers: {
       "content-type": "application/zip",
