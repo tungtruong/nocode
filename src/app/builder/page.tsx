@@ -1631,7 +1631,22 @@ async function resumeJobViaSSE(opts: {
       opts.setMsgs((p) => p.map((m) => m.id === opts.aid ? { ...m, summary: data } : m));
     });
 
+    // Three sources of "error" on an EventSource we have to disambiguate:
+    //   a) Our server fired `event: error\ndata: <msg>` for a real problem
+    //      (job pruned, validation failed, gen errored). `data` is present.
+    //   b) The server closed the connection cleanly after `event: done`.
+    //      `data` is empty AND the close was expected — must NOT reject.
+    //   c) A real transport drop. `data` is empty, readyState transitions
+    //      to CLOSED (2) after the browser gave up reconnecting.
+    // EventSource normally auto-reconnects on transient errors (readyState
+    // stays at 0 = CONNECTING). We only treat (a) and (c) as fatal.
+    let doneFired = false;
+    let firstChunkSeen = false;
+    let transientErrors = 0;
+    const TRANSIENT_LIMIT = 6; // ~6 reconnect attempts before giving up
+
     es.addEventListener("done", () => {
+      doneFired = true;
       es.close();
       if (!opts.askMode) {
         const fin = cleanHtmlClient(acc);
@@ -1646,12 +1661,57 @@ async function resumeJobViaSSE(opts: {
     });
 
     es.addEventListener("error", (ev) => {
-      // EventSource fires "error" on both transport failures (no data field)
-      // and our explicit `event: error` SSE messages (with data). Disambiguate.
+      // (b) — done already fired; the close that triggered this error is
+      // expected. Silent.
+      if (doneFired) return;
+
       const data = (ev as MessageEvent).data;
-      es.close();
-      reject(new Error(typeof data === "string" && data ? data : "Resume connection lost"));
+
+      // (a) — server-sent error event with a message.
+      if (typeof data === "string" && data) {
+        es.close();
+        reject(new Error(data));
+        return;
+      }
+
+      // (c) vs transient. EventSource exposes readyState on the target.
+      const rs = (ev.target as EventSource | null)?.readyState;
+      if (rs === EventSource.CLOSED) {
+        es.close();
+        // If we got at least one chunk before the connection died, the gen
+        // probably finished server-side and was just slow to flush done —
+        // accept what we have rather than failing the whole resume.
+        if (firstChunkSeen && !opts.askMode) {
+          const fin = cleanHtmlClient(acc);
+          opts.updatePreview(fin, true);
+          opts.setHtml(fin);
+          opts.setActive(opts.siOnDone);
+          opts.setMsgs((p) => p.map((m) => m.id === opts.aid ? { ...m, text: fin, html: fin } : m));
+          opts.setPhase("done");
+          opts.setProgress(opts.t["buildDone"] || "Đã xong");
+          resolve();
+          return;
+        }
+        reject(new Error("Resume connection lost"));
+        return;
+      }
+
+      // Transient (browser is auto-reconnecting). Cap retries so we don't
+      // hang forever on a server that's gone.
+      transientErrors += 1;
+      if (transientErrors >= TRANSIENT_LIMIT) {
+        es.close();
+        reject(new Error("Resume connection unstable — gave up after several retries"));
+      }
+      // else: let EventSource keep reconnecting in the background.
     });
+
+    // Promote `firstChunkSeen` whenever we actually receive useful data.
+    // (Wrap the existing handlers — these listeners run after the ones
+    // declared above because of registration order.)
+    es.addEventListener("html", () => { firstChunkSeen = true; });
+    es.addEventListener("summary", () => { firstChunkSeen = true; });
+    es.addEventListener("plan", () => { firstChunkSeen = true; });
   });
 }
 
