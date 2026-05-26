@@ -98,7 +98,12 @@ export async function classifyCapabilities(
           { role: "user", content: `${trimmed}\n\n(return strict JSON)` },
         ],
         temperature: 0,
-        max_tokens: 800,
+        // Thinking-disabled below: tight budget is fine because the model
+        // emits the JSON directly without hidden chain-of-thought tokens.
+        max_tokens: 120,
+        // DeepSeek-V4 hybrid-thinking opt-out. OpenAI SDK strips unknown
+        // typed params; spread-cast forwards the raw field through.
+        ...({ thinking: { type: "disabled" } } as Record<string, unknown>),
       },
       (reason) => console.log(`[CAPS] fallback to OpenAI: ${reason}`),
     );

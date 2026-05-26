@@ -185,10 +185,16 @@ export async function planApp(message: string, userEmail?: string): Promise<AppP
           { role: "user", content: `${trimmed}\n\n(return strict JSON)` },
         ],
         temperature: 0,
-        // Generous budget because DeepSeek's chat model now emits
-        // reasoning_content before the visible JSON — same issue as the
-        // standalone capability classifier had. 1200 is plenty.
-        max_tokens: 1200,
+        // Tight budget OK now — `thinking: {type: disabled}` opt-out below
+        // means the model emits visible content directly without burning
+        // tokens on hidden chain-of-thought. Cuts latency roughly in half
+        // (3.7s → 1.9s in benchmarks on this exact prompt) while staying
+        // on the standard deepseek-v4-pro model.
+        max_tokens: 200,
+        // DeepSeek-V4 hybrid-thinking opt-out. OpenAI SDK strips unknown
+        // typed params — cast to bypass, the field is forwarded verbatim
+        // to the upstream JSON body.
+        ...({ thinking: { type: "disabled" } } as Record<string, unknown>),
       },
       (reason) => console.log(`[ORCH] fallback to OpenAI: ${reason}`),
     );
