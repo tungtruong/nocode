@@ -192,9 +192,13 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <ReferralWidget />
-
+        {/* Model override panel kept right under the header so users testing
+            different LLMs see it immediately — was previously below
+            ReferralWidget which scrolled out of view on accounts with many
+            projects. */}
         <ModelOverridePanel />
+
+        <ReferralWidget />
 
         {topupBanner && (
           <div className={`mt-4 rounded-xl px-4 py-2.5 text-xs ${
@@ -406,10 +410,10 @@ function ModelOverridePanel() {
   // and let the background fetch update `current` once it lands.
 
   return (
-    <div className="mt-4 rounded-2xl border border-[#e8e8ec] bg-white p-4">
+    <div className="mt-4 rounded-2xl border-2 border-[#7c3aed]/40 bg-gradient-to-br from-[#faf5ff] to-white p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-sm font-semibold text-[#18181b]">🧪 Model AI (testing) {!loaded && <span className="text-[10px] text-[#94a3b8] font-normal">đang tải...</span>}</h3>
+          <h3 className="text-sm font-semibold text-[#5b21b6]">🧪 Model AI (testing) {!loaded && <span className="text-[10px] text-[#94a3b8] font-normal">đang tải...</span>}</h3>
           <p className="text-xs text-[#52525b] mt-0.5">
             Chuyển model cho riêng tài khoản của bạn — không ảnh hưởng user khác.
             Áp dụng cho tất cả gen + edit + classifier.
