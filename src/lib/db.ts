@@ -127,6 +127,18 @@ function migrate(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS user_uploads_app_idx
       ON user_uploads(app_id, created_at DESC);
 
+    -- Per-USER settings — flat key/value scoped to user_email. First use is
+    -- the model_override toggle (let an account test a different AI model
+    -- without changing the platform default). Future uses: notification
+    -- preferences, default mode, theme, etc.
+    CREATE TABLE IF NOT EXISTS user_settings (
+      user_email  TEXT NOT NULL COLLATE NOCASE,
+      key         TEXT NOT NULL,
+      value       TEXT NOT NULL,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_email, key)
+    );
+
     -- Per-app owner-managed settings: VietQR recipient bank, branding,
     -- future payment provider keys (BYOK) etc. Single row per app_id.
     -- value_json shape per key documented in src/lib/app-settings.ts.

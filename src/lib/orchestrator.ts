@@ -144,7 +144,7 @@ function pickSuggestions(value: unknown, chosenCaps: readonly CapabilityName[]):
  * fast-path first; falls back to a single unified LLM call for the catch-all
  * web_app mode or any ambiguous prompt.
  */
-export async function planApp(message: string, userEmail?: string): Promise<AppPlan> {
+export async function planApp(message: string, userEmail?: string, modelOverride?: string | null): Promise<AppPlan> {
   const trimmed = message.trim().slice(0, 800);
   if (!trimmed) {
     return { mode: DEFAULT_MODE, caps: [], suggestions: [], tierWarnings: [], source: "keyword+template", confidence: 0 };
@@ -198,6 +198,7 @@ export async function planApp(message: string, userEmail?: string): Promise<AppP
         ...({ thinking: { type: "disabled" } } as Record<string, unknown>),
       },
       (reason) => console.log(`[ORCH] fallback to OpenAI: ${reason}`),
+      modelOverride,
     );
 
     const raw = result.choices[0]?.message?.content ?? "";

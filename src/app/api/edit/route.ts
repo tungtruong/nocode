@@ -9,6 +9,7 @@ import {
 } from "@/lib/vfs";
 import { getToolDefinitions, executeTool } from "@/lib/tools";
 import { createJob, finishJob, finishJobError } from "@/lib/gen-jobs";
+import { getUserModelOverride } from "@/lib/user-settings";
 import { allSummaries as capabilitySummaries } from "@/lib/jv-capabilities";
 import { detectPromptViolation, scanGeneratedHtml, checkRateLimit } from "@/lib/security";
 import { requireSession, authError, type Session } from "@/lib/auth";
@@ -211,6 +212,8 @@ export async function POST(req: NextRequest) {
   try {
     let session: Session;
     try { session = await requireSession(); } catch { return authError(); }
+    // Per-user model override (from /api/user/settings).
+    const modelOverride = getUserModelOverride(session.email);
 
     const body = await req.json();
     const { currentHtml, newMessage, clarifyKey, projectId } = body as {
@@ -434,7 +437,7 @@ export async function POST(req: NextRequest) {
             }, (reason) => {
               console.log(`[EDIT] fallback to OpenAI: ${reason}`);
               sendProgress("progress fallback");
-            });
+            }, modelOverride);
           }
 
           const usage = response.usage;

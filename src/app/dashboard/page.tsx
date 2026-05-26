@@ -194,6 +194,8 @@ export default function DashboardPage() {
 
         <ReferralWidget />
 
+        <ModelOverridePanel />
+
         {topupBanner && (
           <div className={`mt-4 rounded-xl px-4 py-2.5 text-xs ${
             topupBanner.kind === "ok"
@@ -337,6 +339,99 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// Account-level model override — lets an account test a different LLM
+// without changing the platform default. Empty = use whatever the
+// platform standard is (currently deepseek-v4-pro). Allow-list values
+// validated server-side too.
+const MODEL_CHOICES: Array<{ value: string; label: string; hint: string }> = [
+  { value: "",                label: "Mặc định (deepseek-v4-pro)", hint: "Theo cấu hình platform" },
+  { value: "deepseek-v4-pro", label: "deepseek-v4-pro",            hint: "DeepSeek hybrid thinking" },
+  { value: "deepseek-chat",   label: "deepseek-chat",              hint: "DeepSeek non-thinking" },
+  { value: "gpt-4.1-mini",    label: "gpt-4.1-mini",               hint: "OpenAI nhanh, rẻ" },
+  { value: "gpt-4.1",         label: "gpt-4.1",                    hint: "OpenAI mạnh" },
+  { value: "gpt-4o-mini",     label: "gpt-4o-mini",                hint: "OpenAI omni mini" },
+  { value: "gpt-4o",          label: "gpt-4o",                     hint: "OpenAI omni" },
+  { value: "o4-mini",         label: "o4-mini",                    hint: "OpenAI reasoning mini" },
+];
+
+function ModelOverridePanel() {
+  const [current, setCurrent] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      fetch("/api/user/settings")
+        .then((r) => r.ok ? r.json() : null)
+        .then((d) => { if (d) setCurrent(d.model_override || ""); })
+        .catch(() => {})
+        .finally(() => setLoaded(true));
+    });
+  }, []);
+
+  const save = async (value: string) => {
+    setSaving(true);
+    setMsg(null);
+    try {
+      const r = await fetch("/api/user/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "model_override", value }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Lưu thất bại");
+      setCurrent(value);
+      setMsg({
+        kind: "ok",
+        text: value
+          ? `Đã chuyển sang ${value}. Mọi gen/edit từ giờ dùng model này.`
+          : "Đã dùng lại model mặc định của platform.",
+      });
+    } catch (e) {
+      setMsg({ kind: "err", text: e instanceof Error ? e.message : "Lỗi" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!loaded) return null;
+
+  return (
+    <div className="mt-4 rounded-2xl border border-[#e8e8ec] bg-white p-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-sm font-semibold text-[#18181b]">🧪 Model AI (testing)</h3>
+          <p className="text-xs text-[#52525b] mt-0.5">
+            Chuyển model cho riêng tài khoản của bạn — không ảnh hưởng user khác.
+            Áp dụng cho tất cả gen + edit + classifier.
+          </p>
+        </div>
+        <select
+          value={current}
+          onChange={(e) => save(e.target.value)}
+          disabled={saving}
+          className="text-sm px-3 py-2 rounded-lg border border-[#e8e8ec] bg-white min-w-[220px] disabled:opacity-50"
+        >
+          {MODEL_CHOICES.map((c) => (
+            <option key={c.value} value={c.value}>{c.label}</option>
+          ))}
+        </select>
+      </div>
+      {msg && (
+        <p className={`text-xs mt-2 ${msg.kind === "ok" ? "text-emerald-700" : "text-red-600"}`}>
+          {msg.text}
+        </p>
+      )}
+      {current && !msg && (
+        <p className="text-xs text-amber-700 mt-2">
+          ⚠ Đang override: <code className="bg-amber-50 px-1 rounded">{current}</code>
+        </p>
       )}
     </div>
   );

@@ -9,6 +9,7 @@ import { substitutePlaceholders } from "@/lib/html-substitute";
 import { joinDocs, type CapabilityName } from "@/lib/jv-capabilities";
 import { planApp, type AppPlan } from "@/lib/orchestrator";
 import { createJob, setHtml, setPlan, finishJob, finishJobError } from "@/lib/gen-jobs";
+import { getUserModelOverride } from "@/lib/user-settings";
 
 // Base prompt for "new app" generation. The DATA / AUTH / FORMS capability
 // sections used to live inline here, but they cost ~1k prompt tokens on EVERY
@@ -181,6 +182,11 @@ export async function POST(req: NextRequest) {
     const mode: ModeId = modeOf(body?.mode);
     const modeDef = APP_MODES[mode];
     const projId = typeof projectId === "string" ? projectId : null;
+    // Per-user model override (from /api/user/settings). Reads from
+    // user_settings table; null when the account hasn't opted in. Threaded
+    // through every AI call below — orchestrator, main gen, fix, summary —
+    // so the whole request runs on the same model.
+    const modelOverride = getUserModelOverride(session.email);
 
     if (!newMessage || typeof newMessage !== "string") {
       return NextResponse.json({ error: "Thiếu nội dung" }, { status: 400 });
@@ -277,7 +283,7 @@ export async function POST(req: NextRequest) {
             chosenCaps = modeDef.capabilities ?? [];
           } else {
             sendProgress("progress planning");
-            plan = await planApp(newMessage, session.email);
+            plan = await planApp(newMessage, session.email, modelOverride);
             chosenCaps = plan.caps;
             // Stream the plan to the client BEFORE generation starts so the UI
             // can render a "Sẽ tạo: X + Y + Z" banner while the model warms up.
@@ -320,7 +326,7 @@ export async function POST(req: NextRequest) {
           }, (reason) => {
             console.log(`[Chat] fallback to OpenAI for gen: ${reason}`);
             sendProgress("progress fallback");
-          });
+          }, modelOverride);
 
           // Transition the progress bubble away from the last "planning" /
           // "generating" label as soon as bytes start arriving. The byte-
@@ -422,7 +428,7 @@ export async function POST(req: NextRequest) {
               }, (reason) => {
                 console.log(`[Chat] fallback to OpenAI for fix: ${reason}`);
                 sendProgress("progress fallback");
-              });
+              }, modelOverride);
 
               let fixed = "";
               let fixPrompt = 0;
@@ -509,7 +515,7 @@ export async function POST(req: NextRequest) {
                 max_tokens: 250,
                 ...({ thinking: { type: "disabled" } } as Record<string, unknown>),
               });
-            }, (reason) => console.log(`[Chat] fallback to OpenAI for summary: ${reason}`));
+            }, (reason) => console.log(`[Chat] fallback to OpenAI for summary: ${reason}`), modelOverride);
             const summaryText = (summaryResp.choices[0]?.message?.content || "").trim();
             if (summaryResp.usage) recordUsage(
               session.email,

@@ -82,6 +82,7 @@ function safeParse(raw: string): CapabilityName[] | null {
 export async function classifyCapabilities(
   message: string,
   userEmail?: string,
+  modelOverride?: string | null,
 ): Promise<CapabilityPick> {
   const trimmed = message.trim().slice(0, 800);
   if (!trimmed) return { caps: [], source: "llm" };
@@ -106,6 +107,7 @@ export async function classifyCapabilities(
         ...({ thinking: { type: "disabled" } } as Record<string, unknown>),
       },
       (reason) => console.log(`[CAPS] fallback to OpenAI: ${reason}`),
+      modelOverride,
     );
 
     const raw = result.choices[0]?.message?.content ?? "";
