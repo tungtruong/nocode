@@ -109,15 +109,33 @@ CRITICAL constraints:
 - Tap feedback: every button must visibly respond on touch (transform,
   opacity, or color change). VN users tap-test before deciding it works.
 
-Available ZMP SDK shortcuts (already injected via <script src> in the
-template — DO NOT add yourself):
-  - ZaloPay.createOrder({amount, description}) → opens native ZaloPay
-  - ZaloShare.toChat({text, url}) → share to a Zalo chat
-  - ZaloAuth.getUserInfo() → returns {id, name, avatar} of viewer
-  - ZNS.send(phone, template, params) → official notification (paid)
+**Available APIs in single-file HTML** (don't import any package — Zalo's
+ZMP SDK is normally consumed as \`import { ... } from "zmp-sdk/apis"\`
+in a Vite + React project, which isn't us here; JV ships a pre-built
+single HTML file):
 
-For payment, prefer ZaloPay over VietQR — in-Mini-App flow is one tap
-without leaving Zalo. VietQR still works if user prefers bank transfer.
+  - **jv.db / jv.files / jv.auth / jv.realtime** — JV's runtime works
+    inside the Mini App webview the same way it works on a subdomain.
+    Use these for persistence, file uploads, end-user login.
+  - **jv.payment.vietqr({amount, description})** — works fine in ZMA.
+    User scans the QR with their banking app (or screenshots + opens
+    Zalo banking) — this is the safest cross-environment payment for
+    the single-file HTML constraint.
+  - **fetch() against justvibe.me** — works; the Mini App webview
+    allows it.
+
+Things JV's single-file HTML CANNOT use directly (require Vite + React
++ \`zmp-sdk\` npm package — out of scope for one-shot HTML gen):
+  - Native ZaloPay one-tap checkout (Payment.createOrder)
+  - getUserInfo / authorize from zmp-sdk (use jv.auth Google login instead)
+  - openShareSheet (native Zalo share)
+  - setStorage / getStorage (use in-memory JS state — see SANDBOX rule)
+
+If the user explicitly needs native Zalo payment, share, or auth, tell
+them in 1 sentence that JV's quick-export only gets them 80% there and
+suggest they hand the resulting HTML to a developer who adds the
+\`zmp-sdk\` calls. For most VN SMB use cases (menu, booking, catalog,
+loyalty list, event landing) the JV-only flow is sufficient.
 
 ## INDUSTRY TEMPLATES (match Zalo's official starter patterns)
 Pick the one closest to the user's request and lean into its conventions —

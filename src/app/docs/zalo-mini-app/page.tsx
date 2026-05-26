@@ -59,17 +59,15 @@ export default function ZaloMiniAppDocs() {
               <span className="inline-block bg-[#f5f3ff] text-[#7c3aed] px-2 py-0.5 rounded text-xs font-mono">💬 Zalo .zip</span>
             </li>
             <li>
-              File <code>&lt;ten-app&gt;.zmp.zip</code> tự tải về máy — bên trong có 5 file:
+              File <code>&lt;ten-app&gt;.zmp.zip</code> tự tải về máy — bên trong có 3 file:
               <ul className="my-2 ml-4 text-xs font-mono">
                 <li><b>index.html</b> — code app của bạn (đã inject JV runtime)</li>
-                <li><b>app-config.json</b> — Zalo metadata (title, permissions, network whitelist)</li>
-                <li><b>manifest.json</b> — icon + display config</li>
-                <li><b>icon.png</b> — placeholder 1×1, BẮT BUỘC thay bằng icon thật</li>
-                <li><b>README.txt</b> — hướng dẫn submit</li>
+                <li><b>app-config.json</b> — Zalo runtime config (header color, status bar, etc.) theo schema chính thức của ZMA</li>
+                <li><b>README.txt</b> — hướng dẫn submit + note về App ID</li>
               </ul>
             </li>
             <li>
-              <b>Giải nén → thay icon.png → nén lại</b> (giữ nguyên cấu trúc folder).
+              <b>Không cần giải nén — upload nguyên zip lên Zalo Developers.</b>
             </li>
           </ol>
         </Section>
@@ -77,12 +75,15 @@ export default function ZaloMiniAppDocs() {
         <Section title="📤 Submit lên Zalo Developers">
           <ol>
             <li>
-              Vào Zalo Developers Console → app vừa tạo → tab <b>Source Code</b>.
+              Vào Zalo Developers Console → app vừa tạo → tab <b>Source Code</b> → upload zip JV vừa tải.
             </li>
             <li>
-              Upload toàn bộ zip vừa nén lại (Zalo sẽ extract).
-              Mở <code>app-config.json</code> trong console → paste <code>App ID</code>{" "}
-              Zalo cấp vào field <code>app.id</code>.
+              Tab <b>App Info</b> → upload icon brand 192×192 PNG ở field <b>App Icon</b>.
+              <span className="text-amber-700">⚠ Icon KHÔNG nằm trong zip (Zalo lấy từ Console upload riêng).</span>
+            </li>
+            <li>
+              <b>App ID</b> tự gán bởi Zalo khi tạo app — không cần paste vào file nào,
+              Zalo SDK đọc từ runtime. (Khác với hướng dẫn cũ của JV — schema đã đúng theo chuẩn ZMA.)
             </li>
             <li>
               Tab <b>Preview</b> để test thử trong Zalo của bạn trước khi submit.
@@ -98,6 +99,24 @@ export default function ZaloMiniAppDocs() {
               Approve → app live tại <code>zalo.me/s/&lt;app-id&gt;</code> + có thể QR code phân phối.
             </li>
           </ol>
+        </Section>
+
+        <Section title="🔧 Giới hạn của bản single-file HTML">
+          <p>
+            JV xuất 1 file HTML duy nhất — chạy ngon trong Zalo webview cho hầu hết use case
+            (menu, booking, catalog, landing, lead capture), DÙNG ĐƯỢC <b>jv.db / jv.files / jv.auth / jv.payment.vietqr</b> bình thường.
+          </p>
+          <p>
+            <b>Tính năng native Zalo</b> (ZaloPay 1-tap, openShareSheet, getUserInfo, setStorage)
+            cần npm package <code>zmp-sdk</code> + React project — KHÔNG dùng được từ single-file HTML.
+          </p>
+          <p>
+            Nếu app cần native ZaloPay hoặc Zalo login, anh có 2 lựa chọn:
+          </p>
+          <ul>
+            <li><b>JV-only flow</b> (recommend): dùng VietQR cho payment + jv.auth Google cho login. Đủ 80% use case SMB.</li>
+            <li><b>Hand HTML cho developer</b>: dev wrap thành Vite + React project, add <code>zmp-sdk</code> calls, build, deploy bằng <code>zmp deploy</code>. Mất ~1-2 ngày dev.</li>
+          </ul>
         </Section>
 
         <Section title="⚠️ Quy tắc Zalo hay reject">

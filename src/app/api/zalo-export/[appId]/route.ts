@@ -1,15 +1,22 @@
 // GET /api/zalo-export/<appId>
 //
-// Returns a ZIP archive of the user's generated app packaged for Zalo Mini App
-// submission. Owner-only — the bundle includes JV's generated HTML wrapped in
-// the layout Zalo Developers expects:
+// Returns a ZIP archive of the user's generated app packaged for submission
+// to Zalo Developers. Owner-only.
+//
+// Bundle structure matches what `zmp deploy` would upload — the Vite build
+// output at the root, plus `app-config.json` describing runtime appearance:
 //
 //   <zip>
-//     ├── app-config.json   (ZMP metadata: name, icon, routes, permissions)
-//     ├── manifest.json     (icon list + display config)
+//     ├── app-config.json   (ZMA runtime config — REAL Zalo schema, no
+//     │                      made-up fields. App ID lives in zmp-cli.json
+//     │                      on the developer side, not here.)
 //     ├── index.html        (the AI-generated HTML, JV runtime injected)
-//     └── icon.png          (auto-generated 192x192 placeholder if owner
-//                            hasn't uploaded one to /dashboard/data/<id>/files)
+//     └── README.txt        (VN-language submission walkthrough)
+//
+// **No manifest.json, no icon.png in the zip.** Zalo's review UI takes the
+// icon upload as a separate field — bundling our 1x1 placeholder was a
+// guaranteed reject. README tells the owner to upload an icon in the
+// Developers console.
 //
 // Owner takes the zip → uploads at developers.zalo.me → Zalo reviews
 // (~3-5 business days first time, ~1 day for updates) → publishes.
@@ -21,12 +28,6 @@ import path from "path";
 import { requireSession, authError } from "@/lib/auth";
 import { getApp } from "@/lib/store";
 import { jvRuntimeScriptTag } from "@/lib/jv-runtime";
-
-// 1x1 transparent PNG fallback icon — Zalo requires SOMETHING; owner can
-// replace via Zalo Developers' icon-upload field before submitting.
-// Encoded inline to avoid a runtime fetch.
-const PLACEHOLDER_ICON_B64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
 const ID_RE = /^[a-zA-Z0-9_-]{6,64}$/;
 
@@ -68,64 +69,59 @@ export async function GET(
   // the same APIs work.
   html = injectRuntime(html, appId);
 
-  // app-config.json — Zalo's manifest equivalent. Documented at
-  // mini.zalo.me/documents/development/config. Fields used:
-  //   app.title, app.appType, app.statusBarColor, app.headerColor
-  //   pages: route → file map (we only have one page)
-  //   permissions: list of ZMP APIs we need granted at install time
+  // app-config.json — REAL Zalo Mini App runtime config schema as published
+  // in Zalo-MiniApp/zaui-coffee. Fields verified against the published
+  // examples; we do NOT include made-up fields (appType, pages,
+  // permissions, network) that earlier drafts had — those would cause
+  // an automatic reject because they're unknown keys to the ZMA runtime.
+  //
+  // App ID is intentionally absent — it lives in zmp-cli.json on the
+  // developer's machine, and the user fills it in the Zalo Developers
+  // UI when they create the project. Putting an empty/fake one here
+  // would also be a reject.
+  //
+  // Permissions like scope.userInfo are NOT declared at build time;
+  // they're requested at runtime via zmp-sdk's `authorize({ scopes })`.
+  // listCSS/listSyncJS/listAsyncJS are normally auto-filled by Vite
+  // build pipeline — empty arrays are valid for pre-built HTML.
   const appConfig = {
     app: {
       title: app.title || "JustVibe Mini App",
-      description: `${app.title || "App"} — built with JustVibe`,
-      appType: "miniApp",
-      statusBarColor: "#0068ff",
+      headerTitle: app.title || "JustVibe Mini App",
       headerColor: "#ffffff",
+      textColor: "black",
+      statusBarColor: "#ffffff",
+      statusBar: "normal",
+      leftButton: "none",
+      actionBarHidden: false,
+      selfControlLoading: false,
+      hideAndroidBottomNavigationBar: false,
+      hideIOSSafeAreaBottom: false,
     },
-    pages: [
-      { name: "index", file: "index.html" },
-    ],
-    permissions: [
-      // Default permission set — most apps need user info + storage.
-      // The owner can trim this in Zalo Developers UI before submission.
-      "scope.userInfo",
-      "scope.userLocation",
-    ],
-    // JustVibe origin must be in allowed network — Zalo blocks
-    // outbound fetch unless explicitly listed.
-    network: {
-      allowedHosts: ["justvibe.me", "*.justvibe.me", "customers.justvibe.me"],
-    },
-  };
-
-  const manifest = {
-    name: app.title || "JustVibe Mini App",
-    short_name: (app.title || "JV").slice(0, 12),
-    description: `${app.title || "App"} — built with JustVibe`,
-    icons: [
-      { src: "icon.png", sizes: "192x192", type: "image/png" },
-    ],
-    start_url: "index.html",
-    display: "standalone",
-    background_color: "#ffffff",
-    theme_color: "#0068ff",
+    debug: false,
+    listCSS: [] as string[],
+    listSyncJS: [] as string[],
+    listAsyncJS: [] as string[],
   };
 
   const zip = new JSZip();
   zip.file("app-config.json", JSON.stringify(appConfig, null, 2));
-  zip.file("manifest.json", JSON.stringify(manifest, null, 2));
   zip.file("index.html", html);
-  zip.file("icon.png", Buffer.from(PLACEHOLDER_ICON_B64, "base64"));
   zip.file(
     "README.txt",
     `JustVibe Zalo Mini App bundle — ${app.title || appId}\n\n` +
       `Submit at: https://developers.zalo.me/\n\n` +
       `1. Đăng nhập Zalo Developers + chọn Zalo Mini App (cần OA verified).\n` +
-      `2. Tạo app mới hoặc chọn app sẵn có.\n` +
-      `3. Upload toàn bộ file trong zip này (KHÔNG unzip — chỉ giải nén\n` +
-      `   để xem rồi nén lại + upload).\n` +
-      `4. Thay icon.png bằng icon 192x192 thật của bạn (placeholder hiện tại\n` +
-      `   là 1x1 trong suốt — Zalo sẽ reject nếu không thay).\n` +
+      `2. Tạo app mới hoặc chọn app sẵn có. Note lại App ID Zalo cấp.\n` +
+      `3. Upload zip này lên tab Source Code của app trên Developers Console.\n` +
+      `   (Console tự extract — giữ nguyên zip, không cần unzip rồi nén lại.)\n` +
+      `4. Upload ICON RIÊNG ở field "App Icon" trong Developers Console\n` +
+      `   (icon 192x192 logo brand của bạn — KHÔNG để placeholder).\n` +
       `5. Submit để review. Lần đầu ~3-5 ngày làm việc.\n` +
+      `\n` +
+      `App ID: do Zalo cấp khi anh tạo app trong Developers Console.\n` +
+      `KHÔNG nằm trong file app-config.json — Zalo SDK đọc App ID từ\n` +
+      `runtime, không cần hardcode.\n` +
       `\n` +
       `Generated: ${new Date().toISOString()}\n`,
   );
