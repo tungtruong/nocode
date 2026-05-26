@@ -546,6 +546,9 @@ export default function BuilderPage() {
       if (!reader) throw new Error("Không có nội dung trả về");
       const dec = new TextDecoder();
       let acc = "";
+      // Counts every `writing N` heartbeat so the dots-ticker (·, · ·, · · ·)
+      // visibly rotates even when the phase label doesn't change.
+      let writeTick = 0;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -603,18 +606,22 @@ export default function BuilderPage() {
                 stepKey === "done" ? t.buildDone : stepKey;
               setProgress(label);
             } else if (pl.startsWith("writing ")) {
-              // Live byte counter — keeps the bubble alive during the long
-              // gen phase between `plan` and the final `summary` event.
-              // n=0 means heartbeat fired before any visible content arrived
-              // (model is still reasoning) — show "Đang suy nghĩ..." with
-              // elapsed time so the user knows it's working, not stuck.
+              // Bytes counter from the server keeps the bubble alive during
+              // the long gen phase between `plan` and `summary`. Instead of
+              // showing a raw "5.4 KB", we map the byte threshold to one of
+              // ~7 distinct structural phases the AI is likely on (HTML
+              // skeleton → layout → CSS → features → content → polish).
+              // The phase changing every couple seconds + a rotating dots
+              // ticker makes the wait FEEL like progress rather than a
+              // mechanical counter. Wait-perception 101.
               const n = parseInt(pl.slice(8).trim(), 10);
               if (!isNaN(n)) {
+                writeTick++;
+                const dots = WRITING_DOTS[writeTick % WRITING_DOTS.length];
                 if (n === 0) {
-                  setProgress("Đang suy nghĩ...");
+                  setProgress(`Đang suy nghĩ${dots}`);
                 } else {
-                  const sizeStr = n < 1024 ? `${n} ký tự` : `${(n / 1024).toFixed(1)} KB`;
-                  setProgress(`Đang viết HTML · ${sizeStr}`);
+                  setProgress(`${pickWritingPhase(n)}${dots}`);
                 }
               }
             } else if (pl.startsWith("job ")) {
@@ -1786,6 +1793,33 @@ async function resumeJobViaSSE(opts: {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Byte-threshold → structural-phase mapping for the chat-bubble label during
+// main HTML generation. Tracks roughly where AI is in the output: head tags
+// at the top, then large CSS block, then body markup, then JS handlers,
+// closing tags. The bytes don't perfectly correspond to phases (AI may dump
+// CSS before opening body), but the labels feel honest enough and rotating
+// through them keeps the bubble alive psychologically.
+const WRITING_PHASES: Array<[number, string]> = [
+  [0,     "Đang dựng khung HTML"],
+  [800,   "Đang thiết kế giao diện"],
+  [2500,  "Đang viết style CSS"],
+  [6000,  "Đang dựng layout chính"],
+  [12000, "Đang thêm nội dung"],
+  [22000, "Đang viết tính năng JS"],
+  [36000, "Đang hoàn thiện chi tiết"],
+  [60000, "Đang đánh bóng cuối"],
+];
+const WRITING_DOTS = [" ·", " · ·", " · · ·"];
+
+function pickWritingPhase(bytes: number): string {
+  let label = WRITING_PHASES[0][1];
+  for (const [threshold, l] of WRITING_PHASES) {
+    if (bytes >= threshold) label = l;
+    else break;
+  }
+  return label;
 }
 
 // Mirrors src/lib/cleanHtml (server) — strips ```html fences + leading
