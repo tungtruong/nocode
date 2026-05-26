@@ -102,6 +102,16 @@ const PREVIEW_ANIM_SCRIPT = `<script>(function(){
     for (var i = 0; i < els.length; i++) {
       els[i].style.animationDelay = Math.min(i * step, max) + 'ms';
     }
+    // During streaming, the parent throttles srcdoc swaps so the user sees
+    // progressively more content each render. Auto-scroll the iframe so the
+    // newest element (last in DOM) is visible — otherwise the latest chunks
+    // appear off-screen and the preview looks frozen on the header.
+    var last = els[els.length - 1];
+    if (last && typeof last.scrollIntoView === 'function') {
+      // Smooth scroll only if the page is already pretty long — otherwise the
+      // animation reads as "jumping" on a 2-section gen.
+      try { last.scrollIntoView({ block: 'end', behavior: els.length > 6 ? 'smooth' : 'auto' }); } catch (e) {}
+    }
   } catch (e) {}
 })();</script>`;
 
@@ -123,10 +133,9 @@ function injectPreviewAnim(html: string, appId?: string | null): string {
     PREVIEW_BASE_TAG + PREVIEW_CSP + PREVIEW_SHIM + jvBootTag(appId) + PREVIEW_ANIM_STYLE
   );
 }
-function injectPreviewCspOnly(html: string, appId?: string | null): string {
-  if (!html) return html;
-  return injectIntoHead(html, PREVIEW_BASE_TAG + PREVIEW_CSP + PREVIEW_SHIM + jvBootTag(appId));
-}
+// (Previously had a non-animated variant for mid-stream renders; dropped
+// after we switched to "always animate" with a longer throttle for the
+// progressive-reveal feel — see updatePreview comment.)
 function injectIntoHead(html: string, snippet: string): string {
   if (/<head[^>]*>/i.test(html)) return html.replace(/<head([^>]*)>/i, `<head$1>${snippet}`);
   if (/<html[^>]*>/i.test(html)) return html.replace(/<html([^>]*)>/i, `<html$1><head>${snippet}</head>`);
@@ -460,7 +469,14 @@ export default function BuilderPage() {
     let lastPreviewAt = 0;
     const updatePreview = (htmlStr: string, force = false) => {
       const now = Date.now();
-      if (!force && now - lastPreviewAt < 250) return;
+      // Throttle to ~900ms during streaming (was 250ms). Each srcdoc swap
+      // restarts the iframe document, which means every update was
+      // re-firing the fade-in animation on already-present elements and
+      // looked like flicker rather than progress. Spacing renders ~1s
+      // apart lets the staggered fade-in finish before the next swap,
+      // so each render reads as "another chunk of UI appeared with a
+      // smooth fade" instead of "the whole page just blinked".
+      if (!force && now - lastPreviewAt < 900) return;
       lastPreviewAt = now;
       const node = sf.current;
       // Replace the {{APP_ID}} form-action placeholder client-side too —
@@ -469,10 +485,12 @@ export default function BuilderPage() {
       // otherwise. Server still does the same swap before storing the final
       // HTML so deployed apps are correct (defense in depth).
       const substituted = appId ? htmlStr.replaceAll("{{APP_ID}}", appId) : htmlStr;
-      // CSP applies on every render (always). Animation only on FINAL render
-      // (force=true) — mid-stream srcdoc swaps would re-trigger the animation
-      // every 250ms and look like a strobe.
-      if (node) node.srcdoc = force ? injectPreviewAnim(substituted, appId) : injectPreviewCspOnly(substituted, appId);
+      // Animate on EVERY render — with the throttle bumped to ~900ms and
+      // the auto-scroll-to-last-element bit in PREVIEW_ANIM_SCRIPT, each
+      // render reads as "new sections faded in and the iframe slid down to
+      // show them" rather than the previous full-page blink. The fade-in
+      // duration (.35s) fits comfortably inside the 900ms throttle.
+      if (node) node.srcdoc = injectPreviewAnim(substituted, appId);
     };
 
     // Hoisted out of the try block so the catch can read them when handing
