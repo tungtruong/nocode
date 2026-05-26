@@ -1697,9 +1697,28 @@ async function resumeJobViaSSE(opts: {
   const POLL_MS = 1500;
   const MAX_ATTEMPTS = 200;
 
+  // Distinct micro-phases shown to the user during resume polling. Cycling
+  // through these (instead of a wall-clock counter) gives the perception of
+  // actual progress — UX research consistently shows that "X% done / step
+  // 3 of 5" feels much faster than "waited 18 seconds". After we run out of
+  // labels we stay on the last one ("Sắp xong"), since by then the gen IS
+  // imminent — most resumes complete in 3-6 polls.
+  const PHASES = [
+    "Đang kết nối lại với máy chủ",
+    "Đang kiểm tra trạng thái",
+    "Đang lấy mã đã sinh",
+    "Đang xử lý dữ liệu",
+    "Đang ráp lại các phần",
+    "Đang chuẩn bị preview",
+    "Đang dọn dẹp tài nguyên",
+    "Sắp hoàn thành",
+  ];
+  const DOTS = [" ·", " · ·", " · · ·"];
+
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const elapsed = Math.round((attempt * POLL_MS) / 1000);
-    opts.setProgress(`Đang nối lại... ${elapsed}s`);
+    const phase = PHASES[Math.min(attempt, PHASES.length - 1)];
+    const dots = DOTS[attempt % DOTS.length];
+    opts.setProgress(`${phase}${dots}`);
 
     let row: {
       status: "streaming" | "complete" | "error";
