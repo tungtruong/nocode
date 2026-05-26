@@ -411,9 +411,13 @@ export async function POST(req: NextRequest) {
               temperature: 0.2,
               // Higher token cap encourages the model to bundle multiple
               // edit_file calls into a single response (fewer turns spent on
-              // network round-trips), and gives room for reasoning models
-              // (deepseek-v4-pro) whose CoT eats tokens before the visible output.
-              max_tokens: 12000,
+              // network round-trips).
+              max_tokens: 8000,
+              // Tool-using agent doesn't benefit much from hidden CoT —
+              // the tool definitions + system prompt already tell it which
+              // moves are available. Saves 5-15s of invisible reasoning
+              // between every "Đang suy nghĩ" → first tool-call event.
+              ...({ thinking: { type: "disabled" } } as Record<string, unknown>),
             });
 
           let response: Awaited<ReturnType<typeof callAi>>;

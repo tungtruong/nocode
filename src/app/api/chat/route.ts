@@ -312,6 +312,12 @@ export async function POST(req: NextRequest) {
             ],
             temperature: usingTemplate ? 0.5 : 0.7,
             max_tokens: maxTokens,
+            // Orchestrator already decided mode + caps; capability docs give
+            // the model exact API surface; mode template gives the skeleton.
+            // Main gen doesn't need hidden chain-of-thought before writing
+            // HTML — that was 5-15s of "stuck" UX before any visible chunks
+            // arrived. Same model, just opt-out of reasoning.
+            ...({ thinking: { type: "disabled" } } as Record<string, unknown>),
           }, (reason) => {
             console.log(`[Chat] fallback to OpenAI for gen: ${reason}`);
             sendProgress("progress fallback");
@@ -326,9 +332,20 @@ export async function POST(req: NextRequest) {
           let promptTokens = 0;
           let completionTokens = 0;
           let cachedTokens = 0;
-          // Throttle the per-byte progress updates so we don't push 200
-          // messages/sec at the user. ~700ms feels live without being noisy.
-          let lastProgressAt = 0;
+          let lastProgressAt = Date.now();
+          // Defensive idle heartbeat — if the model goes silent for more
+          // than 1.5s (rare with thinking disabled, but happens on slow
+          // provider days), emit a tick so the bubble doesn't look stuck.
+          // Client just re-renders the current byte count + elapsed time.
+          const idleTick = setInterval(() => {
+            const now = Date.now();
+            if (now - lastProgressAt > 1500) {
+              sendProgress(`writing ${accumulated.length}`);
+              lastProgressAt = now;
+            }
+          }, 1000);
+
+          try {
           for await (const chunk of genStream) {
             // NB: we no longer break on `closed`. The send-to-client paths
             // (sendChunk/sendProgress) are no-ops once closed, but we keep
@@ -356,6 +373,9 @@ export async function POST(req: NextRequest) {
               // long stable system+context prefix cheap on repeat calls.
               cachedTokens = chunk.usage.prompt_tokens_details?.cached_tokens || 0;
             }
+          }
+          } finally {
+            clearInterval(idleTick);
           }
           let billedTokens = weightedTokens(promptTokens, completionTokens, cachedTokens);
           if (billedTokens > 0) recordUsage(session.email, promptTokens, completionTokens, cachedTokens);
@@ -398,6 +418,7 @@ export async function POST(req: NextRequest) {
                 ],
                 temperature: 0.3,
                 max_tokens: 16000,
+                ...({ thinking: { type: "disabled" } } as Record<string, unknown>),
               }, (reason) => {
                 console.log(`[Chat] fallback to OpenAI for fix: ${reason}`);
                 sendProgress("progress fallback");
@@ -483,10 +504,10 @@ export async function POST(req: NextRequest) {
                   },
                 ],
                 temperature: 0.5,
-                // Generous budget — reasoning models (e.g. deepseek-v4-pro) burn
-                // tokens on hidden chain-of-thought before they emit visible text;
-                // a tight cap (250) leaves zero room for the actual reply.
-                max_tokens: 1200,
+                // Tight budget with thinking opt-out — summary is short
+                // friendly Vietnamese text, no reasoning needed.
+                max_tokens: 250,
+                ...({ thinking: { type: "disabled" } } as Record<string, unknown>),
               });
             }, (reason) => console.log(`[Chat] fallback to OpenAI for summary: ${reason}`));
             const summaryText = (summaryResp.choices[0]?.message?.content || "").trim();
