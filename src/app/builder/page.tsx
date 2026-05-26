@@ -252,6 +252,58 @@ export default function BuilderPage() {
       .catch(() => {});
   }, []);
 
+  // Auto-recover an unfinished or just-finished gen when the user comes
+  // back to the page. The /api/chat and /api/edit routes both stash a
+  // `jv_active_job:<appId>` localStorage entry when they kick off, and
+  // clear it on successful client-side stream end. If the original
+  // stream died (mobile background kill, server-side fallback path,
+  // network blip) before clearing, the entry survives — and on next
+  // mount we can pull the final HTML straight out of the gen_jobs row.
+  useEffect(() => {
+    const key = `jv_active_job:${appId || "_new"}`;
+    let raw: string | null;
+    try { raw = localStorage.getItem(key); } catch { return; }
+    if (!raw) return;
+    let parsed: { jobId?: string; startedAt?: number };
+    try { parsed = JSON.parse(raw); } catch { localStorage.removeItem(key); return; }
+    const jobId = parsed.jobId;
+    if (!jobId) { localStorage.removeItem(key); return; }
+    // Anything older than 30 min is almost certainly already pruned or moot.
+    if (parsed.startedAt && Date.now() - parsed.startedAt > 30 * 60 * 1000) {
+      localStorage.removeItem(key);
+      return;
+    }
+    // Fire-and-forget — recovery shouldn't block render.
+    queueMicrotask(async () => {
+      try {
+        const r = await fetch(`/api/chat/job/${encodeURIComponent(jobId)}`);
+        if (!r.ok) { localStorage.removeItem(key); return; }
+        const d = await r.json();
+        if (d.status === "complete" && typeof d.html === "string" && d.html) {
+          // Apply the final HTML to the current preview iframe. No
+          // streaming animation — this is a recovery, not a fresh gen.
+          const cleaned = cleanHtmlClient(d.html);
+          setHtml(cleaned);
+          // Surface what changed so the user knows the gen completed.
+          if (d.summary && typeof d.summary === "string") {
+            setProgress(`Đã khôi phục lần gen trước · ${d.summary.slice(0, 80)}`);
+          } else {
+            setProgress("Đã khôi phục lần gen trước");
+          }
+          setPhase("done");
+          localStorage.removeItem(key);
+        } else if (d.status === "error") {
+          // Server-side gen errored — nothing to recover.
+          localStorage.removeItem(key);
+        }
+        // status === "streaming": leave the entry. A subsequent click of
+        // any chat action will attempt resume via the normal SSE path.
+      } catch {
+        // Network / parse failure — keep the entry, user can manually retry.
+      }
+    });
+  }, [appId]);
+
   // Auto-save current project to server
   useEffect(() => {
     if (!appId || !appName) return;
