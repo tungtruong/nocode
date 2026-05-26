@@ -45,12 +45,21 @@ The agent's tool implementations live in `src/lib/tools.ts` and operate on a pla
 
 ### Persistence
 
-There is **no database**. Two JSON files in `data/` (created on first write):
+**SQLite via better-sqlite3** is the primary store. `src/lib/db.ts` owns the
+schema; `src/lib/store.ts` exposes typed CRUD ops via prepared statements
+(concurrent-safe within the process). Tables include `users`, `apps`,
+`projects`, `gen_jobs` (background-gen resume), `usage`, `template_usage`,
+`custom_domains`, `app_settings`, `user_uploads`, `commissions`, plus
+others — see `db.ts` for the full list.
 
-- `data/apps.json` — deployed apps (id → `{user_email, title, url, created_at}`)
-- `data/projects.json` — in-progress projects (id → `{user_email, appName, msgs, html, url, updated_at}`)
+Legacy `data/apps.json` / `data/projects.json` are imported once on first
+boot (`legacy_json_imported` flag in `meta`) then ignored. The SQLite file
+lives at `/app/data/app.sqlite` inside the container (Docker volume-mounted
+from VPS `/opt/justvibe/data/` so it survives image rebuilds).
 
-`src/lib/store.ts` reads each file once into a module-level cache and writes the whole map back on every mutation. This is **not concurrent-safe** — two simultaneous writes can lose data, and the cache is per-process so it won't survive across serverless instances.
+For end-user content from generated apps (form submissions, jv.db rows,
+file-upload metadata), see Supabase (`src/lib/supabase.ts`) — the
+multi-tenant shared store keyed by `(app_id, table_name)`.
 
 Deployed apps are written as static files to `public/apps/<id>/index.html` and served via `src/app/apps/[id]/page.tsx`, which reads the file at request time and renders it inside a sandboxed iframe (`allow-scripts allow-same-origin allow-modals allow-forms`).
 

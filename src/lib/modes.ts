@@ -19,7 +19,8 @@ export type ModeId =
   | "wedding"
   | "landing"
   | "pitch_deck"
-  | "cv_resume";
+  | "cv_resume"
+  | "zalo_mini_app";
 
 type LabelKey = keyof typeof t.vi;
 
@@ -83,6 +84,40 @@ const HINTS_CV_RESUME = `
 - Header icons: email, phone, linkedin, github. Use SVG inline.
 - Theme toggle (light/dark) for screen view; print uses light always (@media print).
 - "Print to PDF" button calls window.print().`.trim();
+
+const HINTS_ZALO_MINI_APP = `
+## MODE: Zalo Mini App
+Generate a single-file app that will run INSIDE the Zalo super-app (Vietnamese
+chat platform, 75M+ users). The HTML will be wrapped into a ZMP (Zalo Mini
+App) bundle by JV's export step and submitted to Zalo Developers.
+
+CRITICAL constraints:
+- **Mobile viewport ONLY**: design for 360-414px wide. Single column.
+  All tap targets ≥ 48px. Use system fonts (don't load Google Fonts —
+  ZMP shell can be slow on first paint).
+- **No localStorage / sessionStorage / cookies** — use \`ZaloAuth.getUserInfo()\`
+  and ZMP \`Storage\` API for persistence (the runtime injects ZMP SDK).
+- **No external CDN scripts**: Zalo bans untrusted JS in Mini App submission
+  review. All CSS + JS inline.
+- **No \`<form action="...">\`** to external URLs unless the URL is
+  https://justvibe.me (Zalo allows justvibe.me as our backend; whitelisted
+  in app-config.json).
+- Use Vietnamese for ALL user-facing text. ZMP audience is 100% VN.
+- Bottom nav bar pattern (3-5 icons) is common — Zalo users expect it.
+- Status bar safe area: leave 24px top padding so content doesn't sit
+  under Zalo's chrome.
+- Tap feedback: every button must visibly respond on touch (transform,
+  opacity, or color change). VN users tap-test before deciding it works.
+
+Available ZMP SDK shortcuts (already injected via <script src> in the
+template — DO NOT add yourself):
+  - ZaloPay.createOrder({amount, description}) → opens native ZaloPay
+  - ZaloShare.toChat({text, url}) → share to a Zalo chat
+  - ZaloAuth.getUserInfo() → returns {id, name, avatar} of viewer
+  - ZNS.send(phone, template, params) → official notification (paid)
+
+For payment, prefer ZaloPay over VietQR — in-Mini-App flow is one tap
+without leaving Zalo. VietQR still works if user prefers bank transfer.`.trim();
 
 // === HTML TEMPLATES per mode ===
 // Conventions inside templates:
@@ -409,6 +444,58 @@ Match tone + level to {{JOB_TITLE}} (vd: senior dev → 3-5 jobs, 5-8 skills per
 </body>
 </html>`;
 
+const TEMPLATE_ZALO_MINI_APP = `<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>{{APP_TITLE}}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f7f8fa;color:#1a1a1a;font-size:16px}
+body{padding-top:env(safe-area-inset-top,24px);padding-bottom:calc(64px + env(safe-area-inset-bottom,0))}
+button,a.btn{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:12px 20px;border:none;border-radius:12px;font-size:16px;font-weight:600;background:#0068ff;color:#fff;transition:transform .1s,opacity .15s}
+button:active,a.btn:active{transform:scale(0.97);opacity:.85}
+.nav-bottom{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #e8e8ec;display:flex;justify-content:space-around;padding:8px 0 calc(8px + env(safe-area-inset-bottom,0));z-index:100}
+.nav-bottom button{flex:1;background:none;color:#71717a;font-size:11px;font-weight:500;flex-direction:column;gap:4px;min-height:56px;padding:4px}
+.nav-bottom button.active{color:#0068ff}
+.nav-bottom button svg{width:22px;height:22px}
+.screen{display:none;padding:16px;min-height:calc(100vh - 80px - env(safe-area-inset-bottom,0))}
+.screen.active{display:block}
+</style>
+</head>
+<body>
+
+<!-- LLM_FILL:
+Generate the screens that {{APP_TITLE}} needs (typically 2-4 screens).
+Each screen is <section class="screen" id="screen-X"> with the first one having .active.
+Add bottom-nav buttons that toggle screens via document.querySelectorAll('.screen').
+Common patterns for Zalo Mini App:
+  - Home screen (greeting + main CTA + featured items)
+  - Catalog/menu screen (jv.db.list to load items)
+  - Order/booking form (POST to /f/{{APP_ID}}/submit)
+  - Profile/history screen (uses ZaloAuth.getUserInfo())
+Use Vietnamese text only. Pay button → ZaloPay.createOrder() preferred over jv.payment.vietqr.
+-->
+
+<nav class="nav-bottom">
+  <!-- LLM_FILL: 3-5 nav buttons matching the screens above. Each has SVG icon + label. -->
+</nav>
+
+<script>
+// Wire bottom-nav screen toggle. Will work even before ZMP SDK loads.
+document.querySelectorAll('.nav-bottom button[data-screen]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.nav-bottom button').forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === 'screen-' + btn.dataset.screen));
+  });
+});
+
+// LLM_FILL: any app-specific JS goes here (data fetch via jv.db, share to chat, etc).
+</script>
+</body>
+</html>`;
+
 // === REGISTRY ===
 
 export const APP_MODES: Record<ModeId, ModeDef> = {
@@ -482,6 +569,18 @@ export const APP_MODES: Record<ModeId, ModeDef> = {
     keywords: ["cv", "resume", "hồ sơ", "portfolio", "lý lịch", "xin việc", "ứng tuyển"],
     // Real avatar upload + portfolio sample images.
     capabilities: ["files"],
+  },
+  zalo_mini_app: {
+    id: "zalo_mini_app",
+    emoji: "💬",
+    labelKey: "modeZaloMiniApp",
+    descKey: "modeZaloMiniAppDesc",
+    systemHints: HINTS_ZALO_MINI_APP,
+    template: TEMPLATE_ZALO_MINI_APP,
+    keywords: ["zalo", "mini app", "miniapp", "zmp", "zalo mini", "official account", "zalo oa", "zns"],
+    // Forms (lead/order), VietQR as fallback payment (ZaloPay is preferred
+    // but injected via ZMP SDK, not jv.payment). Files for product/menu photos.
+    capabilities: ["forms", "files", "payment"],
   },
 };
 

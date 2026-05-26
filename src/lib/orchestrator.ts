@@ -64,6 +64,7 @@ MODES:
 - landing — marketing landing, product launch, lead capture
 - pitch_deck — slide deck, presentation, investor pitch
 - cv_resume — personal CV / portfolio / résumé
+- zalo_mini_app — app to run INSIDE Zalo (Vietnamese super-app), submitted to Zalo Developers as a ZMP bundle. Pick when the user says "zalo", "mini app", "zmp", "zalo mini", "zalo official account", "OA"
 
 CAPABILITIES:
 - forms     — HTML form submission to owner (signup, RSVP, contact, order)

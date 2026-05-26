@@ -274,6 +274,7 @@ export default function DashboardPage() {
                     <button onClick={() => copyLink(app.meta.url)} className="rounded-xl border border-[#e8e8ec] bg-white px-3 py-2 text-xs text-[#71717a] hover:text-[#18181b] hover:border-[#d4d4d8] transition-all">{copied === app.meta.url ? t.dashCopied : t.dashCopy}</button>
                     <Link href={`/dashboard/data/${app.id}`} className="rounded-xl border border-[#e8e8ec] bg-white px-3 py-2 text-xs text-[#71717a] hover:text-[#18181b] hover:border-[#d4d4d8] transition-all">Dữ liệu</Link>
                     <a href={`/api/apps/${app.id}/download`} className="rounded-xl border border-[#e8e8ec] bg-white px-3 py-2 text-xs text-[#71717a] hover:text-[#18181b] hover:border-[#d4d4d8] transition-all">{t.dashDownload}</a>
+                    <a href={`/api/zalo-export/${app.id}`} className="rounded-xl border border-[#e8e8ec] bg-white px-3 py-2 text-xs text-[#71717a] hover:text-[#18181b] hover:border-[#d4d4d8] transition-all" title="Tải bundle Zalo Mini App (.zip) để submit lên Zalo Developers">💬 Zalo .zip</a>
                     <button onClick={() => requestDelete(app.id)} className="rounded-xl border border-red-100 bg-white px-3 py-2 text-xs text-red-500 hover:bg-red-50 hover:border-red-200 transition-all">{t.dashDelete}</button>
                   </div>
                 </div>
