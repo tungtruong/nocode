@@ -1365,15 +1365,38 @@ export default function BuilderPage() {
             )}
           </div>
           <div className="relative flex-1 bg-white">
-            <div className={`absolute inset-0 flex items-center justify-center p-4 sm:p-8 ${visualEdit ? "sm:pr-80" : ""}`}>
-              <div className="h-full w-full sm:max-w-[420px] sm:h-auto sm:aspect-[9/16] sm:max-h-[85vh] rounded-3xl sm:shadow-2xl sm:shadow-black/[0.06] sm:ring-1 sm:ring-black/[0.04] overflow-hidden">
-                <iframe ref={frameA} title="A" className="absolute inset-0 w-full h-full border-0 transition-opacity duration-100"
-                  style={{ opacity: active === 0 ? 1 : 0, pointerEvents: active === 0 ? "auto" : "none", zIndex: active === 0 ? 2 : 1 }}
-                  sandbox="allow-scripts allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation" referrerPolicy="no-referrer" />
-                <iframe ref={frameB} title="B" className="absolute inset-0 w-full h-full border-0 transition-opacity duration-100"
-                  style={{ opacity: active === 1 ? 1 : 0, pointerEvents: active === 1 ? "auto" : "none", zIndex: active === 1 ? 2 : 1 }}
-                  sandbox="allow-scripts allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation" referrerPolicy="no-referrer" />
-              </div>
+            <div className={`absolute inset-0 flex items-center justify-center p-4 sm:p-8 ${visualEdit ? "sm:pr-80" : ""} ${mode === "zalo_mini_app" ? "bg-[#f0f2f5]" : "bg-white"}`}>
+              {mode === "zalo_mini_app" ? (
+                // ZMA phone-shell preview — visually frames the iframe like
+                // it's running inside the Zalo super-app. Helps the model
+                // (and user) feel the actual constraints: status bar,
+                // narrow viewport, bottom nav safe area.
+                <div className="relative h-full max-h-[85vh] aspect-[9/19] rounded-[2rem] bg-black p-2 shadow-2xl shadow-black/20">
+                  <div className="relative h-full w-full rounded-[1.5rem] overflow-hidden bg-white">
+                    {/* Zalo blue status bar mock — height matches actual ZMA shell */}
+                    <div className="absolute top-0 left-0 right-0 h-6 bg-[#0068ff] z-10 flex items-center justify-between px-3 text-[10px] text-white font-medium">
+                      <span>9:41</span>
+                      <span className="text-[8px] tracking-wider">●●●● Zalo</span>
+                      <span>100%</span>
+                    </div>
+                    <iframe ref={frameA} title="A" className="absolute inset-0 w-full h-full border-0 transition-opacity duration-100 pt-6"
+                      style={{ opacity: active === 0 ? 1 : 0, pointerEvents: active === 0 ? "auto" : "none", zIndex: active === 0 ? 2 : 1 }}
+                      sandbox="allow-scripts allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation" referrerPolicy="no-referrer" />
+                    <iframe ref={frameB} title="B" className="absolute inset-0 w-full h-full border-0 transition-opacity duration-100 pt-6"
+                      style={{ opacity: active === 1 ? 1 : 0, pointerEvents: active === 1 ? "auto" : "none", zIndex: active === 1 ? 2 : 1 }}
+                      sandbox="allow-scripts allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation" referrerPolicy="no-referrer" />
+                  </div>
+                </div>
+              ) : (
+                <div className="h-full w-full sm:max-w-[420px] sm:h-auto sm:aspect-[9/16] sm:max-h-[85vh] rounded-3xl sm:shadow-2xl sm:shadow-black/[0.06] sm:ring-1 sm:ring-black/[0.04] overflow-hidden">
+                  <iframe ref={frameA} title="A" className="absolute inset-0 w-full h-full border-0 transition-opacity duration-100"
+                    style={{ opacity: active === 0 ? 1 : 0, pointerEvents: active === 0 ? "auto" : "none", zIndex: active === 0 ? 2 : 1 }}
+                    sandbox="allow-scripts allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation" referrerPolicy="no-referrer" />
+                  <iframe ref={frameB} title="B" className="absolute inset-0 w-full h-full border-0 transition-opacity duration-100"
+                    style={{ opacity: active === 1 ? 1 : 0, pointerEvents: active === 1 ? "auto" : "none", zIndex: active === 1 ? 2 : 1 }}
+                    sandbox="allow-scripts allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation" referrerPolicy="no-referrer" />
+                </div>
+              )}
             </div>
             {visualEdit && (
               <VisualEditInspector

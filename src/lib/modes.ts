@@ -117,7 +117,35 @@ template — DO NOT add yourself):
   - ZNS.send(phone, template, params) → official notification (paid)
 
 For payment, prefer ZaloPay over VietQR — in-Mini-App flow is one tap
-without leaving Zalo. VietQR still works if user prefers bank transfer.`.trim();
+without leaving Zalo. VietQR still works if user prefers bank transfer.
+
+## INDUSTRY TEMPLATES (match Zalo's official starter patterns)
+Pick the one closest to the user's request and lean into its conventions —
+Zalo users recognise these layouts:
+
+- **F&B / restaurant / cafe**: home (hero + featured dishes) → menu list with
+  categories tab + price + add-to-cart pill button → cart screen with quantity
+  steppers → checkout (table number / pickup / delivery toggle). Order goes
+  via /f/{{APP_ID}}/submit OR ZaloPay if amount known.
+- **Retail / shop**: home (banner + 2x2 product grid) → category tabs →
+  product detail (image carousel + size/color picker + add-to-cart) → cart →
+  shipping form. Product photos via jv.db.list('products') with image URLs
+  from jv.files.
+- **Beauty / salon / spa / booking**: home (services grid) → service detail →
+  date picker (next 14 days as horizontal scroll chips) → timeslot picker
+  (avail/booked) → confirm with phone number → ZNS notify owner.
+- **Event / ticket sales**: hero with countdown to event start → event detail
+  (date / location / speakers grid) → ticket types (price tiers) → ZaloPay
+  checkout → QR ticket displayed (scannable at door).
+- **Loyalty / member card**: profile screen (avatar from ZaloAuth.getUserInfo()
+  + member tier + points) → catalog of rewards (redeemable for points) →
+  stamp card visual (X/10 stamps). Stamps stored via jv.db.add per visit.
+- **News / blog / brand profile**: hero with logo + intro → posts list
+  (jv.db.list('posts') sorted by _createdAt desc) → article view → CTA
+  button (Zalo OA follow / share / contact). Lightest mode — mostly content.
+
+If the user's request doesn't match any of the above, default to a F&B-style
+home + list pattern — that's the most common ZMA use case in VN.`.trim();
 
 // === HTML TEMPLATES per mode ===
 // Conventions inside templates:

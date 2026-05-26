@@ -19,6 +19,7 @@ const MODE_COLORS: Record<ModeId, { from: string; to: string; ring: string }> = 
   pitch_deck: { from: "#a78bfa", to: "#8b5cf6", ring: "rgba(167,139,250,0.35)" },  // violet
   cv_resume:  { from: "#34d399", to: "#10b981", ring: "rgba(52,211,153,0.35)" },   // emerald
   web_app:    { from: "#94a3b8", to: "#64748b", ring: "rgba(148,163,184,0.35)" },  // slate
+  zalo_mini_app: { from: "#42aaff", to: "#0068ff", ring: "rgba(0,104,255,0.35)" }, // Zalo blue
 };
 
 export default function LandingPage() {
