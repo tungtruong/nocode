@@ -312,12 +312,11 @@ export async function POST(req: NextRequest) {
             ],
             temperature: usingTemplate ? 0.5 : 0.7,
             max_tokens: maxTokens,
-            // Orchestrator already decided mode + caps; capability docs give
-            // the model exact API surface; mode template gives the skeleton.
-            // Main gen doesn't need hidden chain-of-thought before writing
-            // HTML — that was 5-15s of "stuck" UX before any visible chunks
-            // arrived. Same model, just opt-out of reasoning.
-            ...({ thinking: { type: "disabled" } } as Record<string, unknown>),
+            // Thinking STAYS ON for main gen — user reported quality
+            // regression on shopxedap when we disabled it. The 5-15s
+            // silent phase is handled UX-side: client renders `writing 0`
+            // heartbeats as "Đang suy nghĩ..." with elapsed time so the
+            // bubble keeps moving while the model reasons.
           }, (reason) => {
             console.log(`[Chat] fallback to OpenAI for gen: ${reason}`);
             sendProgress("progress fallback");
@@ -418,7 +417,8 @@ export async function POST(req: NextRequest) {
                 ],
                 temperature: 0.3,
                 max_tokens: 16000,
-                ...({ thinking: { type: "disabled" } } as Record<string, unknown>),
+                // Thinking ON — fix-stream is correcting AI mistakes,
+                // quality matters more than latency.
               }, (reason) => {
                 console.log(`[Chat] fallback to OpenAI for fix: ${reason}`);
                 sendProgress("progress fallback");

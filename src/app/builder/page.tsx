@@ -605,10 +605,17 @@ export default function BuilderPage() {
             } else if (pl.startsWith("writing ")) {
               // Live byte counter — keeps the bubble alive during the long
               // gen phase between `plan` and the final `summary` event.
+              // n=0 means heartbeat fired before any visible content arrived
+              // (model is still reasoning) — show "Đang suy nghĩ..." with
+              // elapsed time so the user knows it's working, not stuck.
               const n = parseInt(pl.slice(8).trim(), 10);
-              if (!isNaN(n) && n > 0) {
-                const sizeStr = n < 1024 ? `${n} ký tự` : `${(n / 1024).toFixed(1)} KB`;
-                setProgress(`Đang viết HTML · ${sizeStr}`);
+              if (!isNaN(n)) {
+                if (n === 0) {
+                  setProgress("Đang suy nghĩ...");
+                } else {
+                  const sizeStr = n < 1024 ? `${n} ký tự` : `${(n / 1024).toFixed(1)} KB`;
+                  setProgress(`Đang viết HTML · ${sizeStr}`);
+                }
               }
             } else if (pl.startsWith("job ")) {
               // Server created a gen_jobs row — stash the id so we can
