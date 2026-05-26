@@ -317,10 +317,18 @@ export async function POST(req: NextRequest) {
             sendProgress("progress fallback");
           });
 
+          // Transition the progress bubble away from the last "planning" /
+          // "generating" label as soon as bytes start arriving. The byte-
+          // count progress events below do further visible work each second.
+          sendProgress("progress writing");
+
           let accumulated = "";
           let promptTokens = 0;
           let completionTokens = 0;
           let cachedTokens = 0;
+          // Throttle the per-byte progress updates so we don't push 200
+          // messages/sec at the user. ~700ms feels live without being noisy.
+          let lastProgressAt = 0;
           for await (const chunk of genStream) {
             // NB: we no longer break on `closed`. The send-to-client paths
             // (sendChunk/sendProgress) are no-ops once closed, but we keep
@@ -331,6 +339,13 @@ export async function POST(req: NextRequest) {
               accumulated += content;
               sendChunk(content);
               persistThrottled(accumulated);
+              const now = Date.now();
+              if (now - lastProgressAt > 700) {
+                lastProgressAt = now;
+                // Single-token integer payload — the client renders this as
+                // "Đang viết HTML... 3.4KB". Cheap, no JSON parse.
+                sendProgress(`writing ${accumulated.length}`);
+              }
             }
             // stream_options.include_usage delivers totals in the final chunk
             if (chunk.usage) {

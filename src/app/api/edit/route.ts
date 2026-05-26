@@ -397,6 +397,10 @@ export async function POST(req: NextRequest) {
             break;
           }
           turn++;
+          // Between every tool round, show the user that the agent is
+          // thinking about the next step. Without this, the bubble sits
+          // on the previous tool label for the full 5-15s AI call.
+          sendProgress(`Đang suy nghĩ bước tiếp (lượt ${turn})`);
 
           const callAi = async (provider: AiProvider) =>
             provider.client.chat.completions.create({
@@ -467,14 +471,18 @@ export async function POST(req: NextRequest) {
               const fnName = tc.function.name;
               const args = JSON.parse(tc.function.arguments);
 
-              // User-friendly progress messages
+              // User-friendly progress messages — suffix with tool number
+              // so the user sees the counter tick up rather than the same
+              // text sitting for 30s+ across a long edit chain.
               const progressMap: Record<string, string> = {
-                read_file: "Đang phân tích giao diện...",
-                edit_file: "Đang chỉnh sửa...",
-                write_file: "Đang tạo mới...",
-                grep: "Đang tìm kiếm...",
+                read_file: "Đang phân tích giao diện",
+                edit_file: "Đang chỉnh sửa",
+                write_file: "Đang tạo mới",
+                grep: "Đang tìm kiếm",
+                get_capability_docs: "Đang tra cứu tài liệu",
               };
-              sendProgress(progressMap[fnName] || fnName);
+              const label = progressMap[fnName] || fnName;
+              sendProgress(`${label} (bước ${toolCalls})`);
 
               console.log(`[EDIT] tool#${toolCalls} ${fnName}`);
 

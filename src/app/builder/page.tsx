@@ -599,8 +599,17 @@ export default function BuilderPage() {
                 stepKey === "summarizing" ? t.buildSummarizing :
                 stepKey === "fallback" ? t.buildFallback :
                 stepKey === "planning" ? "Đang lên kế hoạch..." :
+                stepKey === "writing" ? "Đang viết HTML..." :
                 stepKey === "done" ? t.buildDone : stepKey;
               setProgress(label);
+            } else if (pl.startsWith("writing ")) {
+              // Live byte counter — keeps the bubble alive during the long
+              // gen phase between `plan` and the final `summary` event.
+              const n = parseInt(pl.slice(8).trim(), 10);
+              if (!isNaN(n) && n > 0) {
+                const sizeStr = n < 1024 ? `${n} ký tự` : `${(n / 1024).toFixed(1)} KB`;
+                setProgress(`Đang viết HTML · ${sizeStr}`);
+              }
             } else if (pl.startsWith("job ")) {
               // Server created a gen_jobs row — stash the id so we can
               // reconnect via /api/chat/resume/<jobId> if this stream drops.
