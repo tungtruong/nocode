@@ -1662,13 +1662,14 @@ function FlagTemplateModal(props: {
   );
 }
 
-// Resume an in-flight /api/chat job over SSE after the original stream
-// dropped (mobile background kill, network blip). The endpoint replays
-// everything the gen has accumulated so far + tails new chunks until the
-// job hits `complete` or `error`. Kept module-level so it can close over
-// nothing from the component — all dependencies passed via the opts object.
+// Resume by polling the /api/chat/job/<id> JSON endpoint. We dropped the
+// SSE-based resume because Cloudflare in front of justvibe.me intermittently
+// buffers SSE chunks — clients waited forever for `event: html` data that
+// never arrived. JSON polling is dumber but bullet-proof: every 1.5s we
+// pull a fresh status; when status flips to `complete` we have the full
+// final HTML in one shot, no streaming gymnastics.
 //
-// Resolves on `done` event, rejects on `error` event or connection failure.
+// Resolves when the job hits `complete`, rejects on `error` or 5-min timeout.
 async function resumeJobViaSSE(opts: {
   jobId: string;
   aid: string;
@@ -1689,121 +1690,83 @@ async function resumeJobViaSSE(opts: {
   siOnDone: 0 | 1;
   t: Record<string, string>;
 }): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const url = `/api/chat/resume/${encodeURIComponent(opts.jobId)}`;
-    const es = new EventSource(url, { withCredentials: true });
-    let acc = "";
+  // 1.5s poll cadence balances UX (user sees progress within a couple seconds
+  // of completion) with server load (each poll = single indexed SQLite read).
+  // 200 attempts × 1.5s = 5 minutes — long enough for any reasonable gen,
+  // short enough that a truly dead job doesn't hang the UI forever.
+  const POLL_MS = 1500;
+  const MAX_ATTEMPTS = 200;
 
-    es.addEventListener("plan", (ev) => {
-      try {
-        const data = JSON.parse((ev as MessageEvent).data);
-        opts.setLastPlan(data);
-      } catch { /* malformed plan — silently drop */ }
-    });
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const elapsed = Math.round((attempt * POLL_MS) / 1000);
+    opts.setProgress(`Đang nối lại... ${elapsed}s`);
 
-    es.addEventListener("html", (ev) => {
-      // First `html` event includes everything the gen accumulated before
-      // we reconnected; subsequent events are just-the-deltas. Either way
-      // appending + re-rendering produces correct output.
-      acc += (ev as MessageEvent).data;
-      if (opts.askMode) {
-        opts.setMsgs((p) => p.map((m) => m.id === opts.aid ? { ...m, text: acc, summary: acc } : m));
-      } else {
-        const c2 = cleanHtmlClient(acc);
-        opts.setHtml(c2);
-        opts.updatePreview(c2);
-        opts.setMsgs((p) => p.map((m) => m.id === opts.aid ? { ...m, text: c2, html: c2 } : m));
+    let row: {
+      status: "streaming" | "complete" | "error";
+      html?: string;
+      summary?: string | null;
+      plan_json?: string | null;
+      error_msg?: string | null;
+    };
+    try {
+      const r = await fetch(`/api/chat/job/${encodeURIComponent(opts.jobId)}`, { credentials: "include" });
+      if (r.status === 404) throw new Error("Job đã bị xoá khỏi server — gen lại nhé.");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      row = await r.json();
+    } catch (e) {
+      // Transient network blip — wait and retry. Only bail after 3 in a row,
+      // tracked via the attempt counter.
+      if (attempt > 0 && attempt % 3 === 0) {
+        throw e;
       }
-      opts.setProgress("Đang khôi phục...");
-    });
+      await sleep(POLL_MS);
+      continue;
+    }
 
-    es.addEventListener("summary", (ev) => {
-      const data = (ev as MessageEvent).data;
-      opts.setMsgs((p) => p.map((m) => m.id === opts.aid ? { ...m, summary: data } : m));
-    });
+    // Plan came in late — surface it so the banner appears even on resume.
+    if (row.plan_json) {
+      try { opts.setLastPlan(JSON.parse(row.plan_json)); } catch { /* ignore */ }
+    }
 
-    // Three sources of "error" on an EventSource we have to disambiguate:
-    //   a) Our server fired `event: error\ndata: <msg>` for a real problem
-    //      (job pruned, validation failed, gen errored). `data` is present.
-    //   b) The server closed the connection cleanly after `event: done`.
-    //      `data` is empty AND the close was expected — must NOT reject.
-    //   c) A real transport drop. `data` is empty, readyState transitions
-    //      to CLOSED (2) after the browser gave up reconnecting.
-    // EventSource normally auto-reconnects on transient errors (readyState
-    // stays at 0 = CONNECTING). We only treat (a) and (c) as fatal.
-    let doneFired = false;
-    let firstChunkSeen = false;
-    let transientErrors = 0;
-    const TRANSIENT_LIMIT = 6; // ~6 reconnect attempts before giving up
-
-    es.addEventListener("done", () => {
-      doneFired = true;
-      es.close();
-      if (!opts.askMode) {
-        const fin = cleanHtmlClient(acc);
-        opts.updatePreview(fin, true);
+    if (row.status === "complete" && typeof row.html === "string" && row.html) {
+      // Apply the final HTML. Same setHtml + setPhase("done") shape as the
+      // happy path — the iframe-srcdoc effect at the top of the component
+      // picks up the new `html` and renders it without needing the staged-
+      // frame swap (which can blank the preview if `siOnDone` is stale).
+      const fin = cleanHtmlClient(row.html);
+      if (opts.askMode) {
+        opts.setMsgs((p) => p.map((m) => m.id === opts.aid ? { ...m, text: fin, summary: row.summary || fin } : m));
+      } else {
         opts.setHtml(fin);
-        opts.setActive(opts.siOnDone);
-        opts.setMsgs((p) => p.map((m) => m.id === opts.aid ? { ...m, text: fin, html: fin } : m));
+        // updatePreview targets the staged iframe; safe even though we don't
+        // swap active, because the effect-driven srcdoc update covers BOTH
+        // frames whenever `animatedHtml` changes.
+        opts.updatePreview(fin, true);
+        opts.setMsgs((p) => p.map((m) => m.id === opts.aid ? {
+          ...m,
+          text: fin,
+          html: fin,
+          summary: row.summary || m.summary,
+        } : m));
       }
       opts.setPhase("done");
       opts.setProgress(opts.t["buildDone"] || "Đã xong");
-      resolve();
-    });
+      return;
+    }
 
-    es.addEventListener("error", (ev) => {
-      // (b) — done already fired; the close that triggered this error is
-      // expected. Silent.
-      if (doneFired) return;
+    if (row.status === "error") {
+      throw new Error(row.error_msg || "Gen lỗi phía server");
+    }
 
-      const data = (ev as MessageEvent).data;
+    // status === "streaming" — keep polling.
+    await sleep(POLL_MS);
+  }
 
-      // (a) — server-sent error event with a message.
-      if (typeof data === "string" && data) {
-        es.close();
-        reject(new Error(data));
-        return;
-      }
+  throw new Error(`Resume timeout sau ${(MAX_ATTEMPTS * POLL_MS) / 60000} phút`);
+}
 
-      // (c) vs transient. EventSource exposes readyState on the target.
-      const rs = (ev.target as EventSource | null)?.readyState;
-      if (rs === EventSource.CLOSED) {
-        es.close();
-        // If we got at least one chunk before the connection died, the gen
-        // probably finished server-side and was just slow to flush done —
-        // accept what we have rather than failing the whole resume.
-        if (firstChunkSeen && !opts.askMode) {
-          const fin = cleanHtmlClient(acc);
-          opts.updatePreview(fin, true);
-          opts.setHtml(fin);
-          opts.setActive(opts.siOnDone);
-          opts.setMsgs((p) => p.map((m) => m.id === opts.aid ? { ...m, text: fin, html: fin } : m));
-          opts.setPhase("done");
-          opts.setProgress(opts.t["buildDone"] || "Đã xong");
-          resolve();
-          return;
-        }
-        reject(new Error("Resume connection lost"));
-        return;
-      }
-
-      // Transient (browser is auto-reconnecting). Cap retries so we don't
-      // hang forever on a server that's gone.
-      transientErrors += 1;
-      if (transientErrors >= TRANSIENT_LIMIT) {
-        es.close();
-        reject(new Error("Resume connection unstable — gave up after several retries"));
-      }
-      // else: let EventSource keep reconnecting in the background.
-    });
-
-    // Promote `firstChunkSeen` whenever we actually receive useful data.
-    // (Wrap the existing handlers — these listeners run after the ones
-    // declared above because of registration order.)
-    es.addEventListener("html", () => { firstChunkSeen = true; });
-    es.addEventListener("summary", () => { firstChunkSeen = true; });
-    es.addEventListener("plan", () => { firstChunkSeen = true; });
-  });
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // Mirrors src/lib/cleanHtml (server) — strips ```html fences + leading
