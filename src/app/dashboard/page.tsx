@@ -400,13 +400,16 @@ function ModelOverridePanel() {
     }
   };
 
-  if (!loaded) return null;
+  // Always render — was previously gated on `loaded` which hid the panel
+  // entirely if the initial /api/user/settings fetch was slow or failed.
+  // Now we render the dropdown immediately with the empty (default) value
+  // and let the background fetch update `current` once it lands.
 
   return (
     <div className="mt-4 rounded-2xl border border-[#e8e8ec] bg-white p-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-sm font-semibold text-[#18181b]">🧪 Model AI (testing)</h3>
+          <h3 className="text-sm font-semibold text-[#18181b]">🧪 Model AI (testing) {!loaded && <span className="text-[10px] text-[#94a3b8] font-normal">đang tải...</span>}</h3>
           <p className="text-xs text-[#52525b] mt-0.5">
             Chuyển model cho riêng tài khoản của bạn — không ảnh hưởng user khác.
             Áp dụng cho tất cả gen + edit + classifier.
@@ -415,7 +418,7 @@ function ModelOverridePanel() {
         <select
           value={current}
           onChange={(e) => save(e.target.value)}
-          disabled={saving}
+          disabled={saving || !loaded}
           className="text-sm px-3 py-2 rounded-lg border border-[#e8e8ec] bg-white min-w-[220px] disabled:opacity-50"
         >
           {MODEL_CHOICES.map((c) => (
