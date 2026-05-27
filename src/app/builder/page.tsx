@@ -1196,6 +1196,13 @@ export default function BuilderPage() {
               </button>
             );
           })()}
+          <Link
+            href="/dashboard"
+            className="rounded-lg px-2.5 py-1.5 text-xs text-[#64748b] hover:text-[#7c3aed] hover:bg-[#f1f5f9] transition-all"
+            title="Mở dashboard — danh sách app, billing, cài đặt"
+          >
+            📊 Dashboard
+          </Link>
           <button onClick={handleLogout} className="rounded-lg px-2.5 py-1.5 text-xs text-[#64748b] hover:text-[#64748b] hover:bg-[#f1f5f9] transition-all">{t.signout}</button>
         </div>
       </header>
