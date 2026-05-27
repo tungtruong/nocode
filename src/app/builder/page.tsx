@@ -188,7 +188,11 @@ export default function BuilderPage() {
   // Visual Edit mode: when on, the preview iframe runs the bridge script,
   // hovered elements get a purple outline, clicks open the inspector panel,
   // and edits apply live via postMessage (no LLM call).
-  const [visualEdit, setVisualEdit] = useState(false);
+  // Preview defaults to EDIT mode now (Lovable-style): click an element to
+  // select it for editing. To actually USE the app (test forms, click
+  // buttons through their flows), user toggles "Test" or hits Deploy and
+  // opens the deployed URL — that's the "real" runtime.
+  const [visualEdit, setVisualEdit] = useState(true);
   // Preview viewport mode — controls iframe width to simulate device sizes
   // like Lovable's responsive preview switcher. ZMP mode locks to phone-
   // shell elsewhere; this only applies to other modes.
@@ -1438,18 +1442,9 @@ export default function BuilderPage() {
             </div>
             {html && !busy && (
               <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setVisualEdit((v) => !v)}
-                  aria-label="Visual edit"
-                  title={visualEdit ? "Thoát Visual Edit" : "Visual Edit — click element để sửa text/màu/size không tốn quota"}
-                  className={`flex h-7 px-2 items-center justify-center rounded-lg text-xs gap-1 transition-colors ${
-                    visualEdit
-                      ? "bg-[#7c3aed] text-white"
-                      : "text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#7c3aed]"
-                  }`}
-                >
-                  🎨 <span className="hidden sm:inline">{visualEdit ? "Thoát" : "Visual"}</span>
-                </button>
+                {/* Visual Edit toggle moved to the floating preview toolbar
+                    as "✏ Đang sửa / 🖱 Đang test" — preview defaults to edit
+                    mode now. */}
                 <button
                   onClick={refreshPreview}
                   aria-label={t.buildRefreshPreview}
@@ -1539,12 +1534,26 @@ export default function BuilderPage() {
                   </button>
                 ))}
                 <div className="w-px h-4 bg-[#e2e8f0] mx-1" />
+                {/* Edit vs Test mode toggle — preview defaults to edit
+                    mode (click selects elements). Switch to test mode to
+                    interact with the app like an end user would. */}
+                <button
+                  onClick={() => setVisualEdit(!visualEdit)}
+                  title={visualEdit ? "Đang ở chế độ Sửa — bấm để chuyển sang Test" : "Đang ở chế độ Test — bấm để chuyển sang Sửa"}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors ${
+                    visualEdit
+                      ? "bg-[#7c3aed] text-white"
+                      : "bg-amber-100 text-amber-800 hover:bg-amber-200"
+                  }`}
+                >
+                  {visualEdit ? "✏ Đang sửa" : "🖱 Đang test"}
+                </button>
                 <button
                   onClick={() => setFullscreen(!fullscreen)}
                   title={fullscreen ? "Quay lại chat" : "Toàn màn hình"}
                   className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium text-[#52525b] hover:bg-[#f1f5f9] transition-colors"
                 >
-                  {fullscreen ? "⛶ Thu nhỏ" : "⛶ Toàn màn hình"}
+                  {fullscreen ? "⛶ Thu nhỏ" : "⛶ Toàn"}
                 </button>
               </div>
             )}
