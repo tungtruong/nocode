@@ -189,6 +189,21 @@ export default function BuilderPage() {
   // hovered elements get a purple outline, clicks open the inspector panel,
   // and edits apply live via postMessage (no LLM call).
   const [visualEdit, setVisualEdit] = useState(false);
+  // Preview viewport mode — controls iframe width to simulate device sizes
+  // like Lovable's responsive preview switcher. ZMP mode locks to phone-
+  // shell elsewhere; this only applies to other modes.
+  const [previewSize, setPreviewSize] = useState<"mobile" | "tablet" | "desktop">("mobile");
+  // Fullscreen mode hides the chat panel so the preview takes the full
+  // window width — what end-users will actually see when the app is
+  // deployed. Toggled from the preview toolbar.
+  const [fullscreen, setFullscreen] = useState(false);
+  // ESC key exits fullscreen — standard expectation from any full-app UI.
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFullscreen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullscreen]);
   const [visualSelected, setVisualSelected] = useState<SelectedElement | null>(null);
   const [visualSaving, setVisualSaving] = useState(false);
   const [newAppName, setNewAppName] = useState("");
@@ -1193,7 +1208,7 @@ export default function BuilderPage() {
       </div>
 
       <div className="flex flex-1 min-h-0">
-        <div className={`${mobileTab === "preview" ? "hidden" : "flex"} md:flex w-full flex-col md:w-[384px] lg:w-[440px] xl:w-[480px] bg-white border-r border-[#e2e8f0]`}>
+        <div className={`${fullscreen ? "hidden" : ""} ${mobileTab === "preview" ? "hidden" : "flex"} md:flex w-full flex-col md:w-[384px] lg:w-[440px] xl:w-[480px] bg-white border-r border-[#e2e8f0]`}>
           <div className="border-b border-[#e2e8f0] px-4 py-2 flex items-center justify-between gap-2 bg-[#fafafa]">
             <button
               type="button"
@@ -1462,7 +1477,22 @@ export default function BuilderPage() {
                   </div>
                 </div>
               ) : (
-                <div className="h-full w-full sm:max-w-[420px] sm:h-auto sm:aspect-[9/16] sm:max-h-[85vh] rounded-3xl sm:shadow-2xl sm:shadow-black/[0.06] sm:ring-1 sm:ring-black/[0.04] overflow-hidden">
+                // Responsive preview frame — viewport size set by the toolbar.
+                // Each device size matches a real screen breakpoint so the user
+                // sees what end visitors see at that size.
+                //   mobile  → 390px wide (iPhone 14)
+                //   tablet  → 768px wide (iPad portrait)
+                //   desktop → fills available width up to 1280px
+                <div
+                  className="relative bg-white rounded-2xl sm:shadow-2xl sm:shadow-black/[0.06] sm:ring-1 sm:ring-black/[0.04] overflow-hidden transition-all duration-200"
+                  style={{
+                    width: previewSize === "mobile" ? "390px" : previewSize === "tablet" ? "768px" : "100%",
+                    maxWidth: previewSize === "desktop" ? "1280px" : undefined,
+                    height: previewSize === "mobile" ? "min(85vh, 844px)"
+                          : previewSize === "tablet" ? "min(85vh, 1024px)"
+                          : "min(85vh, 100%)",
+                  }}
+                >
                   <iframe ref={frameA} title="A" className="absolute inset-0 w-full h-full border-0 transition-opacity duration-100"
                     style={{ opacity: active === 0 ? 1 : 0, pointerEvents: active === 0 ? "auto" : "none", zIndex: active === 0 ? 2 : 1 }}
                     sandbox="allow-scripts allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation" referrerPolicy="no-referrer" />
@@ -1472,6 +1502,41 @@ export default function BuilderPage() {
                 </div>
               )}
             </div>
+
+            {/* Viewport + fullscreen toolbar — floating top-center on the
+                preview pane. ZMP mode hides this since the phone-shell is
+                fixed-size anyway. */}
+            {mode !== "zalo_mini_app" && html && (
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 rounded-xl border border-[#e2e8f0] bg-white/95 backdrop-blur shadow-sm px-1 py-1">
+                {([
+                  ["mobile",  "📱", "Mobile (390px)"],
+                  ["tablet",  "📊", "Tablet (768px)"],
+                  ["desktop", "💻", "Desktop"],
+                ] as const).map(([size, icon, label]) => (
+                  <button
+                    key={size}
+                    onClick={() => setPreviewSize(size)}
+                    title={label}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors ${
+                      previewSize === size
+                        ? "bg-[#7c3aed] text-white"
+                        : "text-[#52525b] hover:bg-[#f1f5f9]"
+                    }`}
+                  >
+                    <span>{icon}</span>
+                    <span className="hidden sm:inline">{size === "mobile" ? "Mobile" : size === "tablet" ? "Tablet" : "Desktop"}</span>
+                  </button>
+                ))}
+                <div className="w-px h-4 bg-[#e2e8f0] mx-1" />
+                <button
+                  onClick={() => setFullscreen(!fullscreen)}
+                  title={fullscreen ? "Quay lại chat" : "Toàn màn hình"}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium text-[#52525b] hover:bg-[#f1f5f9] transition-colors"
+                >
+                  {fullscreen ? "⛶ Thu nhỏ" : "⛶ Toàn màn hình"}
+                </button>
+              </div>
+            )}
             {visualEdit && (
               <VisualEditInspector
                 selected={visualSelected}
