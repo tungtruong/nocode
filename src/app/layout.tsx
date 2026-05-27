@@ -83,12 +83,59 @@ async function detectLang(): Promise<"vi" | "en"> {
   return "en";
 }
 
+// JSON-LD structured data — drives rich snippets in SERP. We declare both
+// Organization (for brand panel + sitelinks) and SoftwareApplication (for
+// "AppOffer" rich result with rating + price). Inlined into <head> via a
+// <script type="application/ld+json"> — same shape the Google docs example
+// uses. Single source of truth; per-page schema can extend later.
+const JSONLD = [
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    name: "JustVibe",
+    url: "https://justvibe.me",
+    logo: "https://justvibe.me/favicon.ico",
+    description: "AI no-code app builder for Vietnamese SMBs.",
+    sameAs: [],
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: "JustVibe",
+    applicationCategory: "DeveloperApplication",
+    applicationSubCategory: "No-code app builder",
+    operatingSystem: "Web",
+    url: "https://justvibe.me",
+    description:
+      "Describe an app, get a live web app in 30 seconds. AI generates a deployable site you can publish to your own domain or as a Zalo Mini App.",
+    offers: [
+      { "@type": "Offer", name: "Free",  price: "0",     priceCurrency: "USD" },
+      { "@type": "Offer", name: "Pro",   price: "14.99", priceCurrency: "USD" },
+      { "@type": "Offer", name: "Max",   price: "39.99", priceCurrency: "USD" },
+    ],
+    featureList: [
+      "AI single-prompt web app generation",
+      "One-click deploy to subdomain",
+      "Custom domain via Cloudflare for SaaS",
+      "Zalo Mini App export",
+      "VietQR payment built in",
+      "Visual editor (no code)",
+    ],
+  },
+];
+
 export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   const lang = await detectLang();
   return (
     <html lang={lang} className={`${inter.variable} h-full antialiased`}>
+      <head>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(JSONLD) }}
+        />
+      </head>
       <body className="min-h-full">
         <ClientLayout initialLang={lang}>{children}</ClientLayout>
       </body>

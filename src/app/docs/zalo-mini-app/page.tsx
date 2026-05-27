@@ -1,8 +1,34 @@
 import Link from "next/link";
 
-export const metadata = {
-  title: "Xuất Zalo Mini App — JustVibe",
-  description: "Hướng dẫn tải app JustVibe thành Zalo Mini App và submit lên Zalo Developers.",
+import type { Metadata } from "next";
+
+// This page intentionally keeps Vietnamese-heavy copy in the metadata —
+// the target query cluster is "tao zalo mini app", "huong dan submit zalo
+// mini app", which is overwhelmingly VN-language. The English title prefix
+// catches the smaller "zalo mini app tutorial" / "AI zalo mini app builder"
+// segment for free.
+export const metadata: Metadata = {
+  title: "Zalo Mini App Builder — Tạo + xuất ZMA từ prompt",
+  description:
+    "Tạo Zalo Mini App từ một câu mô tả — JustVibe AI sinh ra HTML, đóng gói bundle .zip đúng schema ZMA chính thức, sẵn sàng submit lên Zalo Developers. Hướng dẫn từ A-Z: OA verify, app-config.json, icon, review process ~3-5 ngày.",
+  keywords: [
+    "zalo mini app",
+    "ZMA",
+    "tao zalo mini app",
+    "zalo mini app builder",
+    "zalo developers submit",
+    "AI zalo mini app",
+    "zalo OA",
+    "JustVibe",
+  ],
+  alternates: { canonical: "/docs/zalo-mini-app" },
+  openGraph: {
+    title: "Zalo Mini App Builder — Generate + export ZMA bundle from one prompt",
+    description:
+      "AI generates the HTML; JustVibe packages it into a valid Zalo Mini App bundle ready for Zalo Developers submission. No code, no setup — works with any Vietnamese SMB use case.",
+    url: "https://justvibe.me/docs/zalo-mini-app",
+    type: "article",
+  },
 };
 
 export default function ZaloMiniAppDocs() {
