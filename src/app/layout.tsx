@@ -9,9 +9,53 @@ const inter = Inter({
   subsets: ["latin"],
 });
 
+// SEO metadata — switched to English per user request to broaden organic
+// reach. The Vietnamese audience already discovers us through direct
+// channels (Zalo, Facebook groups); English SERP queries like "AI app
+// builder", "no-code Vietnam", "Zalo mini app generator" are where we lose
+// out. Keep brand name first so VN users can still recognise it.
 export const metadata: Metadata = {
-  title: "JustVibe — Dựng app không cần code",
-  description: "Mô tả ý tưởng. AI dựng web app theo thời gian thực. Một chạm để deploy.",
+  metadataBase: new URL("https://justvibe.me"),
+  title: {
+    default: "JustVibe — AI No-Code App Builder for Vietnam",
+    template: "%s — JustVibe",
+  },
+  description:
+    "Describe an app, get a live web app in 30 seconds. AI generates a deployable site you can publish to your own domain or as a Zalo Mini App — no code, no setup, free subdomain hosting included.",
+  keywords: [
+    "AI app builder",
+    "no-code Vietnam",
+    "vibe coding",
+    "Zalo Mini App generator",
+    "AI web app generator",
+    "Vietnamese SMB tools",
+    "VietQR payment app",
+    "JustVibe",
+  ],
+  authors: [{ name: "JustVibe" }],
+  alternates: {
+    canonical: "/",
+    languages: { vi: "/", en: "/" },
+  },
+  openGraph: {
+    type: "website",
+    url: "https://justvibe.me",
+    siteName: "JustVibe",
+    title: "JustVibe — AI No-Code App Builder for Vietnam",
+    description:
+      "Describe an app, get a live web app in 30 seconds. AI builds it, you deploy in one click. Custom domains, Zalo Mini App export, VietQR payment built in.",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "JustVibe — AI No-Code App Builder for Vietnam",
+    description:
+      "Describe an app, get a live web app in 30 seconds. Deploy to your own domain or Zalo Mini App. No code required.",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: { index: true, follow: true, "max-snippet": -1, "max-image-preview": "large" },
+  },
 };
 
 // Explicit viewport so iOS Safari renders at device width + scales properly.
