@@ -833,6 +833,17 @@ export default function BuilderPage() {
       });
       return;
     }
+    if (action === "insertAfter") {
+      // Insert relative to selection if any; otherwise append to body.
+      [frameA.current, frameB.current].forEach((f) => {
+        f?.contentWindow?.postMessage({
+          source: "jv-edit", type: "insertAfter",
+          path: visualSelected?.path,
+          html: value,
+        }, "*");
+      });
+      return;
+    }
     if (!visualSelected) return;
     let msgType: string | null = null;
     let extra: Record<string, unknown> = {};

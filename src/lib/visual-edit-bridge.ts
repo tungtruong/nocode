@@ -126,9 +126,15 @@ export const VISUAL_EDIT_BRIDGE_SCRIPT = `<script data-jv-bridge>(function(){
 
   // Allowed inline-style props the inspector can set. Anything else is
   // ignored — keeps malformed messages from corrupting the DOM.
+  // Longhand variants (paddingTop, marginLeft, etc.) added so the per-side
+  // padding/margin sliders can target one side at a time without clobbering
+  // the others.
   var STYLE_PROPS = {
     color: 1, backgroundColor: 1, fontSize: 1, padding: 1,
     margin: 1, borderRadius: 1, textAlign: 1, fontWeight: 1,
+    paddingTop: 1, paddingRight: 1, paddingBottom: 1, paddingLeft: 1,
+    marginTop: 1, marginRight: 1, marginBottom: 1, marginLeft: 1,
+    opacity: 1, boxShadow: 1, border: 1,
   };
 
   function apply(path, prop, value) {
@@ -178,6 +184,105 @@ export const VISUAL_EDIT_BRIDGE_SCRIPT = `<script data-jv-bridge>(function(){
     el.parentNode.insertBefore(clone, el.nextSibling);
   }
 
+  // Insert a snippet of HTML AFTER the element at the given path. The new
+  // node is parsed via a throwaway template element so any string the
+  // parent sends is constructed safely. Used by the inspector palette.
+  function insertAfter(path, html) {
+    var ref = elFromPath(path);
+    if (!ref || !ref.parentNode) return;
+    var tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    var frag = tpl.content;
+    // Insert nodes in reverse so the resulting order matches the input.
+    var nodes = Array.prototype.slice.call(frag.childNodes);
+    for (var i = nodes.length - 1; i >= 0; i--) {
+      ref.parentNode.insertBefore(nodes[i], ref.nextSibling);
+    }
+  }
+
+  // For when there's nothing selected — append to <body> so the new element
+  // lands at the bottom of the page (most expected behaviour for "add
+  // section" with no context).
+  function appendToBody(html) {
+    var tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    document.body.appendChild(tpl.content);
+  }
+
+  // === Drag-drop reorder ===
+  // Top-level body children become draggable when bridge is enabled. On
+  // drop we send the new sibling order back to the parent via postMessage
+  // — parent re-snapshots so its HTML state matches.
+  var DRAG_ZONE_CLASS = '__jv_drop_zone__';
+  var draggingEl = null;
+  function setupDrag(root) {
+    var children = root.children || [];
+    for (var i = 0; i < children.length; i++) {
+      var ch = children[i];
+      if (ch.hasAttribute && ch.hasAttribute('data-jv-bridge')) continue;
+      if (ch.id === '__jv_theme_override__' || ch.id === '__justvibe_err__') continue;
+      ch.setAttribute('draggable', 'true');
+    }
+  }
+  function teardownDrag(root) {
+    var children = root.children || [];
+    for (var i = 0; i < children.length; i++) {
+      children[i].removeAttribute && children[i].removeAttribute('draggable');
+    }
+  }
+  function onDragStart(e) {
+    if (!enabled) return;
+    // Walk up from the target to the first DIRECT child of <body> — drag
+    // only re-orders top-level sections, not arbitrary nested elements.
+    var el = e.target;
+    while (el && el.parentNode !== document.body) el = el.parentNode;
+    if (!el) return;
+    draggingEl = el;
+    el.style.opacity = '0.4';
+    e.dataTransfer.effectAllowed = 'move';
+  }
+  function onDragOver(e) {
+    if (!enabled || !draggingEl) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    var over = e.target;
+    while (over && over.parentNode !== document.body) over = over.parentNode;
+    if (!over || over === draggingEl) return;
+    // Visual drop indicator
+    var rect = over.getBoundingClientRect();
+    var before = (e.clientY - rect.top) < rect.height / 2;
+    over.style.borderTop = before ? '3px solid #7c3aed' : '';
+    over.style.borderBottom = before ? '' : '3px solid #7c3aed';
+  }
+  function onDragLeave(e) {
+    var t = e.target;
+    if (t && t.style) {
+      t.style.borderTop = '';
+      t.style.borderBottom = '';
+    }
+  }
+  function onDrop(e) {
+    if (!enabled || !draggingEl) return;
+    e.preventDefault();
+    var over = e.target;
+    while (over && over.parentNode !== document.body) over = over.parentNode;
+    if (!over || over === draggingEl) { cleanupDrag(); return; }
+    var rect = over.getBoundingClientRect();
+    var before = (e.clientY - rect.top) < rect.height / 2;
+    if (before) document.body.insertBefore(draggingEl, over);
+    else document.body.insertBefore(draggingEl, over.nextSibling);
+    cleanupDrag();
+    window.parent.postMessage({ source: 'jv-edit', type: 'restructured' }, '*');
+  }
+  function cleanupDrag() {
+    if (draggingEl) { draggingEl.style.opacity = ''; draggingEl = null; }
+    var all = document.body.children;
+    for (var i = 0; i < all.length; i++) {
+      all[i].style.borderTop = '';
+      all[i].style.borderBottom = '';
+    }
+  }
+
   function applyTheme(color) {
     // Inject (or update) a <style> tag that overrides common "primary" hooks
     // — Tailwind utility hex matches, CSS variables, common class names.
@@ -211,10 +316,22 @@ export const VISUAL_EDIT_BRIDGE_SCRIPT = `<script data-jv-bridge>(function(){
     if (d.type === 'enable') {
       enabled = true;
       document.body && (document.body.style.cursor = 'crosshair');
+      document.body && setupDrag(document.body);
     } else if (d.type === 'disable') {
       enabled = false;
       if (hovered) { hovered.style.outline = hoverOutline; hovered = null; }
       document.body && (document.body.style.cursor = '');
+      document.body && teardownDrag(document.body);
+      cleanupDrag();
+    } else if (d.type === 'insertAfter') {
+      if (d.path && d.html) {
+        insertAfter(d.path, d.html);
+      } else if (d.html) {
+        appendToBody(d.html);
+      }
+      // Re-enable drag for any newly inserted top-level children.
+      document.body && setupDrag(document.body);
+      window.parent.postMessage({ source: 'jv-edit', type: 'restructured' }, '*');
     } else if (d.type === 'apply') {
       apply(d.path, d.prop, d.value);
     } else if (d.type === 'move') {
@@ -237,6 +354,11 @@ export const VISUAL_EDIT_BRIDGE_SCRIPT = `<script data-jv-bridge>(function(){
   document.addEventListener('mousemove', onMove, true);
   document.addEventListener('mouseleave', onLeave, true);
   document.addEventListener('click', onClick, true);
+  document.addEventListener('dragstart', onDragStart, true);
+  document.addEventListener('dragover', onDragOver, true);
+  document.addEventListener('dragleave', onDragLeave, true);
+  document.addEventListener('drop', onDrop, true);
+  document.addEventListener('dragend', cleanupDrag, true);
 
   window.parent.postMessage({ source: 'jv-edit', type: 'ready' }, '*');
 })();</script>`;
