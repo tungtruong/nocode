@@ -8,7 +8,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { UsageBadge } from "@/components/UsageBadge";
 import { APP_MODES, DEFAULT_MODE, type ModeId } from "@/lib/modes";
 import { VISUAL_EDIT_BRIDGE_SCRIPT } from "@/lib/visual-edit-bridge";
-import { VisualEditInspector, type SelectedElement, type EditProp } from "@/components/VisualEditInspector";
+import { VisualEditInspector, type SelectedElement, type EditProp, type EditAction } from "@/components/VisualEditInspector";
 
 function cleanHtml(raw: string): string {
   let cleaned = raw;
@@ -807,8 +807,57 @@ export default function BuilderPage() {
     });
   }, [visualSelected]);
 
-  // Ask the bridge to snapshot the current DOM and post it back. The message
-  // listener above writes the new HTML into state + exits edit mode.
+  // Structural actions (move / delete / duplicate) + global theme.
+  // Move/delete/duplicate shift the path tree — we drop selection so the
+  // user re-clicks the now-moved element instead of editing whichever
+  // sibling happens to occupy the old path.
+  const handleVisualAction = useCallback((action: EditAction, value?: string) => {
+    if (action === "theme") {
+      [frameA.current, frameB.current].forEach((f) => {
+        f?.contentWindow?.postMessage({ source: "jv-edit", type: "theme", color: value }, "*");
+      });
+      return;
+    }
+    if (!visualSelected) return;
+    let msgType: string | null = null;
+    let extra: Record<string, unknown> = {};
+    if (action === "moveUp") { msgType = "move"; extra = { dir: "up" }; }
+    else if (action === "moveDown") { msgType = "move"; extra = { dir: "down" }; }
+    else if (action === "delete") { msgType = "delete"; }
+    else if (action === "duplicate") { msgType = "duplicate"; }
+    if (!msgType) return;
+    [frameA.current, frameB.current].forEach((f) => {
+      f?.contentWindow?.postMessage({
+        source: "jv-edit", type: msgType, path: visualSelected.path, ...extra,
+      }, "*");
+    });
+    // Restructured — old path no longer reliable. Clear selection; user
+    // re-clicks element to continue editing.
+    if (action === "delete") setVisualSelected(null);
+  }, [visualSelected]);
+
+  // Image swap — upload the file via jv.files (owner-only endpoint) and
+  // return the resulting CDN URL so the inspector can set <img src>.
+  const handleUploadImage = useCallback(async (file: File): Promise<string | null> => {
+    if (!appId) {
+      setError("App chưa deploy. Bấm Deploy trước khi swap ảnh.");
+      return null;
+    }
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("appId", appId);
+      const r = await fetch("/api/files/upload", { method: "POST", body: fd });
+      if (!r.ok) throw new Error((await r.json()).error || "Upload failed");
+      const d = await r.json();
+      return d.url || null;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Lỗi upload");
+      return null;
+    }
+  }, [appId]);
+
+  // Ask the bridge to snapshot the current DOM and post it back.
   const saveVisualEdits = useCallback(() => {
     setVisualSaving(true);
     const target = activeRef.current === 0 ? frameA.current : frameB.current;
@@ -1427,6 +1476,8 @@ export default function BuilderPage() {
               <VisualEditInspector
                 selected={visualSelected}
                 onApply={applyVisualEdit}
+                onAction={handleVisualAction}
+                onUploadImage={handleUploadImage}
                 onClose={() => setVisualEdit(false)}
                 onSave={saveVisualEdits}
                 saving={visualSaving}
